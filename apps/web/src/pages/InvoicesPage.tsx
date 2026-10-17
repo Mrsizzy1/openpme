@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
 import { formatCurrency } from '@smart-pme/shared';
-import { Receipt, Printer, CreditCard, X, AlertTriangle, RefreshCw, CheckCircle, FileSpreadsheet } from 'lucide-react';
+import { Receipt, Printer, CreditCard, X, AlertTriangle, RefreshCw, CheckCircle, FileSpreadsheet, Share2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { exportToCsv } from '../utils/exportCsv';
@@ -129,6 +129,22 @@ export const InvoicesPage: React.FC = () => {
     }));
     exportToCsv('Factures_OpenPME', rows);
     success('Export Excel / CSV des factures téléchargé avec succès !');
+  };
+
+  const handleShareWhatsApp = (inv: any) => {
+    const phone = inv.customer?.phone ? inv.customer.phone.replace(/[^0-9]/g, '') : '';
+    const message = encodeURIComponent(
+      `*${organization?.name || 'OpenPME'} - FACTURE OFFICIELLE*\n` +
+      `N° Facture : *${inv.invoiceNumber}*\n` +
+      `Client : *${inv.customer?.name || 'Client Comptoir'}*\n` +
+      `Date : ${new Date(inv.createdAt).toLocaleDateString('fr-FR')}\n` +
+      `Total : *${formatCurrency(Number(inv.total), inv.currency)}*\n` +
+      `Statut : *${statusLabels[inv.status] || inv.status}*\n` +
+      `Solde restant : *${formatCurrency(Number(inv.balance), inv.currency)}*\n\n` +
+      `_Merci de votre confiance._`
+    );
+    const url = phone ? `https://wa.me/${phone}?text=${message}` : `https://wa.me/?text=${message}`;
+    window.open(url, '_blank');
   };
 
   return (
@@ -375,13 +391,24 @@ export const InvoicesPage: React.FC = () => {
                 />
               </div>
             </div>
-            <div className="modal-footer" style={{ background: '#F8FAFC', borderColor: '#E2E8F0' }}>
+            <div className="modal-footer" style={{ background: '#F8FAFC', borderColor: '#E2E8F0', display: 'flex', justifyContent: 'space-between' }}>
               <button type="button" className="btn btn-secondary" onClick={() => setSelectedInvoice(null)}>
                 Fermer
               </button>
-              <button type="button" className="btn btn-primary" onClick={() => window.print()}>
-                <Printer size={14} /> Imprimer
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ background: '#25D366', color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  onClick={() => handleShareWhatsApp(selectedInvoice)}
+                  title="Partager la facture sur WhatsApp"
+                >
+                  <Share2 size={14} /> Envoyer sur WhatsApp
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => window.print()}>
+                  <Printer size={14} /> Imprimer
+                </button>
+              </div>
             </div>
           </div>
         </div>

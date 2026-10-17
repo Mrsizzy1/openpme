@@ -17,6 +17,8 @@ import {
   CornerDownLeft,
   FileSpreadsheet,
   Printer,
+  Share2,
+  Keyboard,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -95,6 +97,34 @@ export const SalesPage: React.FC = () => {
       if (now - lastKeyTime > 65) {
         buffer = '';
       }
+      // Raccourcis clavier caisse express
+      if (e.key === 'F1') {
+        e.preventDefault();
+        const searchInput = document.getElementById('pos-search-input');
+        if (searchInput) searchInput.focus();
+        return;
+      }
+      if (e.key === 'F2') {
+        e.preventDefault();
+        setActiveTab((prev) => (prev === 'pos' ? 'history' : 'pos'));
+        return;
+      }
+      if (e.key === 'F4') {
+        e.preventDefault();
+        if (cart.length > 0 && !submitting) {
+          handleCheckout();
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (cart.length > 0) {
+          if (window.confirm('Voulez-vous vider le panier en cours ?')) {
+            clearCart();
+          }
+        }
+        return;
+      }
+
       lastKeyTime = now;
 
       if (e.key === 'Enter') {
@@ -120,7 +150,7 @@ export const SalesPage: React.FC = () => {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [products]);
+  }, [products, cart, submitting]);
 
   const addToCart = (product: any) => {
     setErrorMsg(null);
@@ -304,8 +334,9 @@ export const SalesPage: React.FC = () => {
                 <div className="input-with-icon" style={{ width: '260px' }}>
                   <Search size={14} className="input-icon" />
                   <input
+                    id="pos-search-input"
                     type="text"
-                    placeholder="Rechercher produit ou code..."
+                    placeholder="[F1] Rechercher produit ou code..."
                     className="input-field"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
@@ -865,19 +896,43 @@ export const SalesPage: React.FC = () => {
               </div>
             </div>
             <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="btn btn-secondary"
-              >
-                <Printer size={14} /> Imprimer le ticket
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ background: '#25D366', color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  onClick={() => {
+                    const s = successSale?.sale || successSale;
+                    const inv = successSale?.invoice;
+                    const message = encodeURIComponent(
+                      `*${organization?.name || 'OpenPME'} - TICKET DE CAISSE*\n` +
+                      `Ticket N° : *${s?.saleNumber}*\n` +
+                      (inv ? `Facture : *${inv?.invoiceNumber}*\n` : '') +
+                      `Date : ${new Date(s?.createdAt || Date.now()).toLocaleString('fr-FR')}\n` +
+                      `Total Encaissé : *${formatCurrency(Number(s?.total || 0), s?.currency || 'CDF')}*\n` +
+                      `Mode : *${paymentMethod}*\n\n` +
+                      `_Merci pour votre visite chez ${organization?.name || 'OpenPME'} !_`
+                    );
+                    window.open(`https://wa.me/?text=${message}`, '_blank');
+                  }}
+                  title="Envoyer le ticket par WhatsApp"
+                >
+                  <Share2 size={14} /> WhatsApp
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="btn btn-secondary"
+                >
+                  <Printer size={14} /> Imprimer
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => setSuccessSale(null)}
                 className="btn btn-primary"
               >
-                Nouvelle vente
+                Nouvelle vente [F4]
               </button>
             </div>
           </div>
