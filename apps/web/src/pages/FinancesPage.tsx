@@ -13,9 +13,11 @@ import {
   X,
   RefreshCw,
   CheckCircle,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { exportToCsv } from '../utils/exportCsv';
 
 const EXPENSE_CATEGORIES = [
   'Frais de fonctionnement',
@@ -366,6 +368,31 @@ export const FinancesPage: React.FC = () => {
         <div className="table-toolbar">
           <span className="table-toolbar-title">Journal des dépenses</span>
           <div className="table-toolbar-actions">
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              onClick={() => {
+                if (!expenses.length) {
+                  toastError('Aucune dépense à exporter.');
+                  return;
+                }
+                const rows = expenses.map((exp) => ({
+                  'Date': new Date(exp.createdAt).toLocaleDateString('fr-FR'),
+                  'Catégorie': exp.category,
+                  'Bénéficiaire': exp.beneficiary,
+                  'Mode Paiement': exp.method,
+                  'Référence': exp.reference || '—',
+                  'Montant': exp.amount,
+                  'Devise': exp.currency || 'CDF',
+                  'Observations': exp.notes || '—',
+                }));
+                exportToCsv('Depenses_OpenPME', rows);
+                success('Journal des dépenses exporté avec succès !');
+              }}
+              title="Exporter les dépenses vers Excel/CSV"
+            >
+              <FileSpreadsheet size={13} /> Exporter Excel
+            </button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={loadFinances}>
               <RefreshCw size={13} />
             </button>

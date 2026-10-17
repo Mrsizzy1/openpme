@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
 import { formatCurrency } from '@smart-pme/shared';
-import { Receipt, Printer, CreditCard, X, AlertTriangle, RefreshCw, CheckCircle } from 'lucide-react';
+import { Receipt, Printer, CreditCard, X, AlertTriangle, RefreshCw, CheckCircle, FileSpreadsheet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { exportToCsv } from '../utils/exportCsv';
+import { QRCodeDisplay } from '../components/QRCodeDisplay';
 
 const statusLabels: Record<string, string> = {
   PAID: 'Payée',
@@ -108,6 +110,27 @@ export const InvoicesPage: React.FC = () => {
     { value: 'CANCELLED', label: 'Annulées' },
   ];
 
+  const handleExportInvoices = () => {
+    if (!invoices.length) {
+      toastError('Aucune facture à exporter.');
+      return;
+    }
+    const rows = invoices.map((inv) => ({
+      'N° Facture': inv.invoiceNumber,
+      'Date Émission': new Date(inv.createdAt).toLocaleDateString('fr-FR'),
+      'Client': inv.customer?.name || 'Client Comptoir',
+      'Statut': statusLabels[inv.status] || inv.status,
+      'Devise': inv.currency,
+      'Sous-total HT': inv.subtotal,
+      'TVA (16%)': inv.taxAmount,
+      'Total TTC': inv.total,
+      'Montant Réglé': inv.paidAmount,
+      'Solde Restant': inv.balance,
+    }));
+    exportToCsv('Factures_OpenPME', rows);
+    success('Export Excel / CSV des factures téléchargé avec succès !');
+  };
+
   return (
     <div>
       <div className="table-wrapper">
@@ -125,6 +148,9 @@ export const InvoicesPage: React.FC = () => {
             ))}
           </div>
           <div className="table-toolbar-actions">
+            <button type="button" className="btn btn-sm btn-secondary" onClick={handleExportInvoices} title="Exporter les factures vers Excel/CSV">
+              <FileSpreadsheet size={13} /> Exporter Excel
+            </button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={loadInvoices}>
               <RefreshCw size={13} /> Actualiser
             </button>
@@ -334,10 +360,19 @@ export const InvoicesPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Pied légal */}
-              <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: '12px', fontSize: '0.75rem', color: '#6B7280', textAlign: 'center', lineHeight: 1.5 }}>
-                {organization?.settings?.invoiceFooterNote || 'Facture certifiée conforme aux exigences fiscales — République Démocratique du Congo'}<br />
-                {organization?.settings?.bankDetails && `Coordonnées bancaires : ${organization.settings.bankDetails}`}
+              {/* Pied légal & QR Code Fiscal */}
+              <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+                <div style={{ fontSize: '0.75rem', color: '#6B7280', lineHeight: 1.5, textAlign: 'left', flex: 1 }}>
+                  <div style={{ fontWeight: 700, color: '#1E293B', marginBottom: '2px' }}>Mentions Fiscales & Légales (RDC) :</div>
+                  NIF : <strong>{organization?.taxId || 'A1209384E'}</strong> · RCCM : <strong>{organization?.rccm || 'CD/KIN/RCCM/20-B-1092'}</strong><br />
+                  {organization?.settings?.invoiceFooterNote || 'Facture certifiée conforme aux exigences fiscales — République Démocratique du Congo'}<br />
+                  {organization?.settings?.bankDetails && `Coordonnées : ${organization.settings.bankDetails}`}
+                </div>
+                <QRCodeDisplay
+                  value={`OPENPME:FAC=${selectedInvoice.invoiceNumber};NIF=${organization?.taxId || 'A1209384E'};TOTAL=${selectedInvoice.total}${selectedInvoice.currency};DATE=${selectedInvoice.createdAt}`}
+                  size={95}
+                  label="Scan Fiscalité DGI"
+                />
               </div>
             </div>
             <div className="modal-footer" style={{ background: '#F8FAFC', borderColor: '#E2E8F0' }}>

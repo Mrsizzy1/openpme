@@ -15,9 +15,13 @@ import {
   DollarSign,
   Banknote,
   CornerDownLeft,
+  FileSpreadsheet,
+  Printer,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { exportToCsv } from '../utils/exportCsv';
+import { QRCodeDisplay } from '../components/QRCodeDisplay';
 
 export const SalesPage: React.FC = () => {
   const { organization } = useAuth();
@@ -734,9 +738,37 @@ export const SalesPage: React.FC = () => {
         <div className="table-wrapper">
           <div className="table-toolbar">
             <span className="table-toolbar-title">Journal des ventes</span>
-            <button type="button" className="btn btn-sm btn-secondary" onClick={loadData}>
-              <RefreshCw size={13} /> Actualiser
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => {
+                  if (!salesHistory.length) {
+                    toastError('Aucune vente à exporter.');
+                    return;
+                  }
+                  const rows = salesHistory.map((s) => ({
+                    'N° Vente': s.saleNumber,
+                    'Date & Heure': new Date(s.createdAt).toLocaleString('fr-FR'),
+                    'Client': s.customer?.name || 'Client comptant',
+                    'Vendeur': `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.trim(),
+                    'Articles': s.items?.length || 0,
+                    'Devise': s.currency,
+                    'Total Encaissé': s.total,
+                    'Facture Rattachée': s.invoice?.invoiceNumber || '—',
+                    'Statut': statusLabel[s.status] || s.status,
+                  }));
+                  exportToCsv('Journal_Ventes_OpenPME', rows);
+                  success('Journal des ventes exporté en CSV/Excel avec succès !');
+                }}
+                title="Exporter le journal des ventes vers Excel/CSV"
+              >
+                <FileSpreadsheet size={13} /> Exporter Excel
+              </button>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={loadData}>
+                <RefreshCw size={13} /> Actualiser
+              </button>
+            </div>
           </div>
           <div className="table-container">
             {salesHistory.length === 0 ? (
@@ -822,14 +854,30 @@ export const SalesPage: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              {/* QR Code Fiscal du Reçu */}
+              <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center' }}>
+                <QRCodeDisplay
+                  value={`OPENPME:VENTE=${successSale.sale?.saleNumber};MONTANT=${successSale.sale?.total}${successSale.sale?.currency};DATE=${new Date().toISOString()}`}
+                  size={90}
+                  label="Scan Reçu Fiscal"
+                />
+              </div>
             </div>
-            <div className="modal-footer">
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="btn btn-secondary"
+              >
+                <Printer size={14} /> Imprimer le ticket
+              </button>
               <button
                 type="button"
                 onClick={() => setSuccessSale(null)}
                 className="btn btn-primary"
               >
-                Fermer et continuer
+                Nouvelle vente
               </button>
             </div>
           </div>
