@@ -18,7 +18,7 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 
 
 class SmartPMEDesktop(QMainWindow):
-    def __init__(self, target_url="http://localhost:5173", api_url="http://localhost:3000/api"):
+    def __init__(self, target_url="http://localhost:5173", api_url="http://localhost:3001/api/v1"):
         super().__init__()
         self.target_url = target_url
         self.api_url = api_url
@@ -181,7 +181,7 @@ def main():
     app.setOrganizationName("Smart PME SARL")
 
     target_url = os.environ.get("DESKTOP_WEB_URL", "http://localhost:5173")
-    api_url = os.environ.get("DESKTOP_API_URL", "http://localhost:3000/api")
+    api_url = os.environ.get("DESKTOP_API_URL", "http://localhost:3001/api/v1")
 
     window = SmartPMEDesktop(target_url=target_url, api_url=api_url)
     window.show()
