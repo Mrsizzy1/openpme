@@ -1,0 +1,175 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+
+export interface TerminalState {
+  id: string;
+  organizationId: string;
+  userId?: string;
+  userName: string;
+  userRole: string;
+  clientType: 'DESKTOP_PYQT' | 'WEB_POS' | 'BROWSER';
+  ipAddress: string;
+  lastPing: Date;
+  status: 'ONLINE' | 'LOCKED' | 'OFFLINE';
+  pendingCommand: 'NONE' | 'LOCK' | 'UNLOCK' | 'KILL' | 'MESSAGE';
+  commandMessage?: string;
+  cashSessionId?: string;
+}
+
+@Injectable()
+export class RemoteControlService {
+  constructor(private prisma: PrismaService) {}
+
+  // Registre en mémoire des terminaux connectés
+  private terminals = new Map<string, TerminalState>();
+
+  /**
+   * Heartbeat envoyé régulièrement par les clients Desktop et Web
+   */
+  async registerHeartbeat(data: {
+    terminalId: string;
+    organizationId: string;
+    userId?: string;
+    clientType?: 'DESKTOP_PYQT' | 'WEB_POS' | 'BROWSER';
+    ipAddress?: string;
+  }): Promise<{ action: string; message?: string }> {
+    const { terminalId, organizationId, userId, clientType = 'DESKTOP_PYQT', ipAddress = '127.0.0.1' } = data;
+
+    let userName = 'Poste Inconnu';
+    let userRole = 'GUEST';
+
+    if (userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, role: true },
+      });
+      if (user) {
+        userName = `${user.firstName} ${user.lastName}`;
+        userRole = user.role;
+      }
+    }
+
+    // Récupérer la session de caisse active éventuelle
+    const activeSession = userId ? await this.prisma.cashSession.findFirst({
+      where: { organizationId, userId, status: 'OPEN' },
+      select: { id: true },
+    }) : null;
+
+    let terminal = this.terminals.get(terminalId);
+
+    if (!terminal) {
+      terminal = {
+        id: terminalId,
+        organizationId,
+        userId,
+        userName,
+        userRole,
+        clientType,
+        ipAddress,
+        lastPing: new Date(),
+        status: 'ONLINE',
+        pendingCommand: 'NONE',
+        cashSessionId: activeSession?.id,
+      };
+      this.terminals.set(terminalId, terminal);
+    } else {
+      terminal.lastPing = new Date();
+      terminal.userId = userId;
+      terminal.userName = userName;
+      terminal.userRole = userRole;
+      terminal.ipAddress = ipAddress;
+      terminal.cashSessionId = activeSession?.id;
+    }
+
+    const command = terminal.pendingCommand;
+    const msg = terminal.commandMessage;
+
+    // Si la commande était un KILL, on la consomme après livraison
+    if (command === 'KILL') {
+      terminal.pendingCommand = 'NONE';
+      terminal.status = 'OFFLINE';
+    }
+
+    return { action: command, message: msg };
+  }
+
+  /**
+   * Lister tous les terminaux de l'entreprise
+   */
+  async listTerminals(organizationId: string): Promise<TerminalState[]> {
+    const now = Date.now();
+    const result: TerminalState[] = [];
+
+    for (const terminal of this.terminals.values()) {
+      if (terminal.organizationId === organizationId) {
+        // Considérer offline si pas de ping depuis plus de 45 secondes
+        if (now - terminal.lastPing.getTime() > 45000) {
+          terminal.status = 'OFFLINE';
+        }
+        result.push(terminal);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Verrouiller un poste à distance
+   */
+  async lockTerminal(organizationId: string, terminalId: string, reason?: string) {
+    const terminal = this.terminals.get(terminalId);
+    if (!terminal || terminal.organizationId !== organizationId) {
+      throw new NotFoundException('Terminal introuvable.');
+    }
+
+    terminal.pendingCommand = 'LOCK';
+    terminal.status = 'LOCKED';
+    terminal.commandMessage = reason || 'Poste verrouillé par la Direction.';
+    return { success: true, message: 'Commande de verrouillage transmise.' };
+  }
+
+  /**
+   * Déverrouiller un poste à distance
+   */
+  async unlockTerminal(organizationId: string, terminalId: string) {
+    const terminal = this.terminals.get(terminalId);
+    if (!terminal || terminal.organizationId !== organizationId) {
+      throw new NotFoundException('Terminal introuvable.');
+    }
+
+    terminal.pendingCommand = 'UNLOCK';
+    terminal.status = 'ONLINE';
+    terminal.commandMessage = undefined;
+    return { success: true, message: 'Poste déverrouillé avec succès.' };
+  }
+
+  /**
+   * Forcer la fermeture / extinction du logiciel à distance (Kill switch)
+   */
+  async killTerminal(organizationId: string, terminalId: string, reason?: string) {
+    const terminal = this.terminals.get(terminalId);
+    if (!terminal || terminal.organizationId !== organizationId) {
+      throw new NotFoundException('Terminal introuvable.');
+    }
+
+    terminal.pendingCommand = 'KILL';
+    terminal.status = 'OFFLINE';
+    terminal.commandMessage = reason || 'Fermeture forcée ordonnée par le Manager / Propriétaire.';
+
+    // Si une session de caisse est ouverte, on la trace dans le journal d'audit
+    if (terminal.userId) {
+      await this.prisma.auditLog.create({
+        data: {
+          organizationId,
+          userId: terminal.userId,
+          action: 'REMOTE_TERMINAL_KILLED',
+          entity: 'Terminal',
+          entityId: terminalId,
+          newValues: { reason: terminal.commandMessage, killedAt: new Date().toISOString() },
+        },
+      }).catch(() => {});
+    }
+
+    return { success: true, message: 'Ordre de fermeture immédiate envoyé au terminal.' };
+  }
+}

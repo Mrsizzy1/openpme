@@ -11,6 +11,7 @@ import {
   Truck,
   ShieldAlert,
   UserCheck,
+  Monitor,
   Settings,
   LogOut,
   Building2,
@@ -87,6 +88,12 @@ const navItems: NavItem[] = [
     to: '/users',
     label: 'Équipe & Rôles',
     icon: UserCheck,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER'],
+  },
+  {
+    to: '/terminals',
+    label: 'Postes & Contrôle Distant',
+    icon: Monitor,
     roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER'],
   },
   {

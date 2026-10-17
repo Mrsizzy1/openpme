@@ -336,5 +336,43 @@ export class ApiClient {
       method: 'DELETE',
     });
   }
+
+  // Remote Control & Supervision (Terminals & Killswitch)
+  static getTerminals() {
+    return this.request<any[]>('/remote-control/terminals');
+  }
+
+  static lockTerminal(id: string, reason?: string) {
+    return this.request<any>(`/remote-control/terminals/${id}/lock`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  static unlockTerminal(id: string) {
+    return this.request<any>(`/remote-control/terminals/${id}/unlock`, {
+      method: 'POST',
+    });
+  }
+
+  static killTerminal(id: string, reason?: string) {
+    return this.request<any>(`/remote-control/terminals/${id}/kill`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  static sendHeartbeat(data: {
+    terminalId: string;
+    organizationId: string;
+    userId?: string;
+    clientType?: 'DESKTOP_PYQT' | 'WEB_POS' | 'BROWSER';
+  }) {
+    return this.request<any>('/remote-control/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
 }
+
 

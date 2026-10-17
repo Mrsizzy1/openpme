@@ -15,6 +15,7 @@ import { FinancesPage } from './pages/FinancesPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { SuppliersPage } from './pages/SuppliersPage';
 import { UsersPage } from './pages/UsersPage';
+import { TerminalsPage } from './pages/TerminalsPage';
 import { AnomaliesPage } from './pages/AnomaliesPage';
 import { SettingsPage } from './pages/SettingsPage';
 
@@ -167,6 +168,18 @@ export const App: React.FC = () => {
                 subtitle="Collaborateurs, attribution des permissions RBAC et accès"
               >
                 <UsersPage />
+              </ProtectedLayout>
+            }
+          />
+
+          <Route
+            path="/terminals"
+            element={
+              <ProtectedLayout
+                title="Supervision & Contrôle à Distance"
+                subtitle="Gestion des postes de travail connectés, verrouillage et fermeture forcée à distance"
+              >
+                <TerminalsPage />
               </ProtectedLayout>
             }
           />

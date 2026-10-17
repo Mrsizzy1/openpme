@@ -13,6 +13,7 @@ import {
   ShoppingCart,
   ExternalLink,
   RefreshCw,
+  Monitor,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -209,6 +210,69 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div className="kpi-sub">Détectées, en attente de résolution</div>
         </div>
+      </div>
+
+      {/* Barre d'état de contrôle à distance */}
+      <div style={{
+        background: 'linear-gradient(90deg, #1E293B 0%, #0F172A 100%)',
+        color: '#F8FAFC',
+        borderRadius: '10px',
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '14px',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.15)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            padding: '10px',
+            borderRadius: '8px',
+            color: '#60A5FA',
+          }}>
+            <Monitor size={22} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '0.9375rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>Supervision en Direct & Contrôle à Distance des Postes</span>
+              <span style={{
+                background: '#10B981',
+                color: 'white',
+                fontSize: '10px',
+                padding: '2px 6px',
+                borderRadius: '10px',
+                fontWeight: 700,
+              }}>
+                ACTIF
+              </span>
+            </div>
+            <div style={{ fontSize: '0.8125rem', color: '#94A3B8', marginTop: '2px' }}>
+              Surveillez les terminaux de caisse connectés, verrouillez les écrans ou déclenchez l'arrêt d'urgence à distance.
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => navigate('/terminals')}
+          className="btn"
+          style={{
+            background: '#2563EB',
+            color: 'white',
+            border: 'none',
+            fontWeight: 600,
+            fontSize: '13px',
+            padding: '8px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Monitor size={15} /> Gérer les Postes & Killswitch <ExternalLink size={13} />
+        </button>
       </div>
 
       {/* Tableaux de bas de page */}
