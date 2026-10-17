@@ -24,7 +24,7 @@ const ProtectedLayout: React.FC<{ children: React.ReactNode; title: string; subt
   title,
   subtitle,
 }) => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const [activeSession, setActiveSession] = useState<any | null>(null);
   const [anomalyCount, setAnomalyCount] = useState<number>(0);
   const [lowStockCount, setLowStockCount] = useState<number>(0);
@@ -56,6 +56,67 @@ const ProtectedLayout: React.FC<{ children: React.ReactNode; title: string; subt
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  const isPosCashier = new URLSearchParams(window.location.search).get('posMode') === 'cashier';
+
+  if (isPosCashier) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#F8FAFC', display: 'flex', flexDirection: 'column' }}>
+        <header style={{
+          background: '#0F172A',
+          color: '#FFFFFF',
+          padding: '12px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderBottom: '1px solid #1E293B',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '18px', fontWeight: 900, letterSpacing: '-0.5px', color: '#38BDF8' }}>
+              SMART PME
+            </span>
+            <span style={{
+              background: '#0284C7',
+              color: 'white',
+              fontSize: '11px',
+              fontWeight: 800,
+              padding: '3px 10px',
+              borderRadius: '20px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}>
+              POSTE CAISSE ENREGISTREUSE
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <span style={{ fontSize: '13px', color: '#94A3B8' }}>
+              Opérateur : <b style={{ color: '#F8FAFC' }}>{user?.firstName} {user?.lastName}</b>
+            </span>
+            <a
+              href="/"
+              style={{
+                fontSize: '12px',
+                color: '#94A3B8',
+                textDecoration: 'none',
+                background: '#1E293B',
+                border: '1px solid #334155',
+                padding: '5px 12px',
+                borderRadius: '6px',
+                fontWeight: 600
+              }}
+              title="Retourner vers le tableau de bord ERP complet"
+            >
+              Console ERP
+            </a>
+          </div>
+        </header>
+
+        <main style={{ flex: 1, padding: '16px' }}>{children}</main>
+      </div>
+    );
   }
 
   return (

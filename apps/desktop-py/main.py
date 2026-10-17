@@ -77,10 +77,10 @@ class SmartPMEDesktop(QMainWindow):
         self.health_timer.start(15000)
         self.check_backend_health()
 
-        # Timer pour le contrôle à distance et le Kill Switch (toutes les 4 secondes)
+        # Timer pour le contrôle à distance et le Kill Switch (toutes les 1.5 secondes pour réactivité instantanée)
         self.remote_control_timer = QTimer(self)
         self.remote_control_timer.timeout.connect(self.check_remote_control)
-        self.remote_control_timer.start(4000)
+        self.remote_control_timer.start(1500)
         self.check_remote_control()
 
     def init_ui(self):
@@ -261,22 +261,41 @@ class SmartPMEDesktop(QMainWindow):
             self.remote_status_label.setText("Supervision à distance : En attente")
             self.remote_status_label.setStyleSheet("padding: 2px 8px; font-size: 11px; color: #64748B;")
 
-    def handle_remote_kill(self, reason):
-        """Fermeture forcée ordonnée à distance par le manager ou admin."""
+    def logout_and_exit(self, reason="Fermeture du logiciel"):
+        """Déconnecte les comptes de la caisse, réinitialise la session et quitte immédiatement."""
         self.remote_control_timer.stop()
-        reason_text = reason or "La fermeture à distance a été ordonnée par le Manager / Administrateur."
-        
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Critical)
-        msg_box.setWindowTitle("Arrêt Forcé à Distance (Killswitch)")
-        msg_box.setText("<h3>FERMETURE IMMÉDIATE DU LOGICIEL</h3>")
-        msg_box.setInformativeText(f"{reason_text}\n\nL'application va se fermer automatiquement.")
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-        msg_box.exec()
+        print(f"[DECONNEXION & FERMETURE] {reason}")
+        try:
+            # Effacer tokens et caches de session locale
+            self.browser.page().runJavaScript("try { localStorage.clear(); sessionStorage.clear(); } catch(e){}")
+            # Signaler la libération du terminal et la déconnexion au serveur
+            payload = json.dumps({"reason": reason}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self.api_url}/remote-control/terminals/{self.terminal_id}/logout",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            urllib.request.urlopen(req, timeout=1)
+        except Exception:
+            pass
+        finally:
+            try:
+                self.close()
+                QApplication.closeAllWindows()
+                QApplication.quit()
+            except Exception:
+                pass
+            os._exit(0)
 
-        # Quitter immédiatement le processus
-        QApplication.quit()
-        sys.exit(0)
+    def handle_remote_kill(self, reason):
+        """Fermeture forcée ordonnée à distance par le manager ou admin (Kill switch instantané)."""
+        self.logout_and_exit(reason or "Fermeture à distance ordonnée par la Direction.")
+
+    def closeEvent(self, event):
+        """Déconnexion et nettoyage lors de la fermeture de la fenêtre par l'utilisateur"""
+        self.logout_and_exit("Fermeture de la fenêtre desktop.")
+        event.accept()
 
     def handle_remote_lock(self, reason):
         """Verrouille l'accès au poste."""
@@ -329,7 +348,8 @@ def main():
     app.setApplicationName("Smart PME Finance")
     app.setOrganizationName("Smart PME SARL")
 
-    target_url = os.environ.get("DESKTOP_WEB_URL", "http://localhost:5173")
+    # Ouvrir directement le mode caisse POS par défaut sur le poste desktop
+    target_url = os.environ.get("DESKTOP_WEB_URL", "http://localhost:5173/sales?posMode=cashier")
     api_url = os.environ.get("DESKTOP_API_URL", "http://localhost:3001/api/v1")
 
     window = SmartPMEDesktop(target_url=target_url, api_url=api_url)

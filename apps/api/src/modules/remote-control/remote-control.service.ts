@@ -32,13 +32,14 @@ export class RemoteControlService {
     userId?: string;
     clientType?: 'DESKTOP_PYQT' | 'WEB_POS' | 'BROWSER';
     ipAddress?: string;
+  }) {
+    const { terminalId, organizationId, userId, clientType = 'DESKTOP_PYQT', ipAddress = '127.0.0.1' } = data;
+
     let targetOrgId = organizationId;
     if (!targetOrgId || targetOrgId === 'org-pme-demo') {
       const firstOrg = await this.prisma.organization.findFirst({ select: { id: true } });
       if (firstOrg) targetOrgId = firstOrg.id;
     }
-
-    const { terminalId, userId, clientType = 'DESKTOP_PYQT', ipAddress = '127.0.0.1' } = data;
 
     let userName = clientType === 'DESKTOP_PYQT' ? 'Poste Caisse Windows' : 'Terminal Web';
     let userRole = 'CAISSIER';
@@ -87,6 +88,9 @@ export class RemoteControlService {
       }
       terminal.ipAddress = ipAddress;
       terminal.cashSessionId = activeSession?.id;
+      if (terminal.status === 'OFFLINE' && terminal.pendingCommand === 'NONE') {
+        terminal.status = 'ONLINE';
+      }
     }
 
     const command = terminal.pendingCommand;
@@ -109,15 +113,15 @@ export class RemoteControlService {
     const result: TerminalState[] = [];
 
     for (const terminal of this.terminals.values()) {
-      // Afficher les terminaux de l'organisation ou les postes desktop rattachés
+      // Si le terminal est sur la démo ou sans org, le rattacher à l'organisation active
       if (
         terminal.organizationId === organizationId ||
         terminal.organizationId === 'org-pme-demo' ||
         !terminal.organizationId
       ) {
         terminal.organizationId = organizationId;
-        // Considérer offline si pas de ping depuis plus de 45 secondes
-        if (now - terminal.lastPing.getTime() > 45000) {
+        // Considérer offline si pas de ping depuis plus de 40 secondes
+        if (now - terminal.lastPing.getTime() > 40000) {
           terminal.status = 'OFFLINE';
         }
         result.push(terminal);
@@ -128,11 +132,20 @@ export class RemoteControlService {
   }
 
   /**
-   * Verrouiller un poste à distance
+   * Verrouiller un ou tous les postes à distance
    */
   async lockTerminal(organizationId: string, terminalId: string, reason?: string) {
+    if (terminalId === 'ALL') {
+      for (const t of this.terminals.values()) {
+        t.pendingCommand = 'LOCK';
+        t.status = 'LOCKED';
+        t.commandMessage = reason || 'Tous les postes ont été verrouillés par la Direction.';
+      }
+      return { success: true, message: 'Tous les terminaux ont été verrouillés.' };
+    }
+
     const terminal = this.terminals.get(terminalId);
-    if (!terminal || terminal.organizationId !== organizationId) {
+    if (!terminal) {
       throw new NotFoundException('Terminal introuvable.');
     }
 
@@ -143,11 +156,20 @@ export class RemoteControlService {
   }
 
   /**
-   * Déverrouiller un poste à distance
+   * Déverrouiller un ou tous les postes à distance
    */
   async unlockTerminal(organizationId: string, terminalId: string) {
+    if (terminalId === 'ALL') {
+      for (const t of this.terminals.values()) {
+        t.pendingCommand = 'UNLOCK';
+        t.status = 'ONLINE';
+        t.commandMessage = undefined;
+      }
+      return { success: true, message: 'Tous les terminaux ont été déverrouillés.' };
+    }
+
     const terminal = this.terminals.get(terminalId);
-    if (!terminal || terminal.organizationId !== organizationId) {
+    if (!terminal) {
       throw new NotFoundException('Terminal introuvable.');
     }
 
@@ -161,20 +183,33 @@ export class RemoteControlService {
    * Forcer la fermeture / extinction du logiciel à distance (Kill switch)
    */
   async killTerminal(organizationId: string, terminalId: string, reason?: string) {
+    const reasonMsg = reason || 'Fermeture forcée ordonnée par le Manager / Propriétaire.';
+
+    if (terminalId === 'ALL') {
+      let count = 0;
+      for (const t of this.terminals.values()) {
+        t.pendingCommand = 'KILL';
+        t.status = 'OFFLINE';
+        t.commandMessage = reasonMsg;
+        count++;
+      }
+      return { success: true, message: `Ordre d'arrêt d'urgence envoyé à l'ensemble des ${count} terminaux.` };
+    }
+
     const terminal = this.terminals.get(terminalId);
-    if (!terminal || terminal.organizationId !== organizationId) {
+    if (!terminal) {
       throw new NotFoundException('Terminal introuvable.');
     }
 
     terminal.pendingCommand = 'KILL';
     terminal.status = 'OFFLINE';
-    terminal.commandMessage = reason || 'Fermeture forcée ordonnée par le Manager / Propriétaire.';
+    terminal.commandMessage = reasonMsg;
 
-    // Si une session de caisse est ouverte, on la trace dans le journal d'audit
+    // Journal d'audit
     if (terminal.userId) {
       await this.prisma.auditLog.create({
         data: {
-          organizationId,
+          organizationId: terminal.organizationId || organizationId,
           userId: terminal.userId,
           action: 'REMOTE_TERMINAL_KILLED',
           entity: 'Terminal',
@@ -185,5 +220,21 @@ export class RemoteControlService {
     }
 
     return { success: true, message: 'Ordre de fermeture immédiate envoyé au terminal.' };
+  }
+
+  /**
+   * Déconnexion immédiate du terminal et libération de la session
+   */
+  async logoutTerminal(terminalId: string, reason?: string) {
+    const terminal = this.terminals.get(terminalId);
+    if (terminal) {
+      terminal.status = 'OFFLINE';
+      terminal.userId = undefined;
+      terminal.userName = 'Poste Déconnecté';
+      terminal.cashSessionId = undefined;
+      terminal.pendingCommand = 'NONE';
+      terminal.commandMessage = reason || 'Session déconnectée et fermée.';
+    }
+    return { success: true, message: 'Terminal déconnecté avec succès.' };
   }
 }

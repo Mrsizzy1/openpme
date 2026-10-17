@@ -437,28 +437,61 @@ export const SalesPage: React.FC = () => {
     );
   }
 
+  const isPosCashier = new URLSearchParams(window.location.search).get('posMode') === 'cashier';
+
   return (
     <div>
-      {/* Onglets */}
-      <div className="tabs">
-        <button
-          type="button"
-          className={`tab-btn${activeTab === 'pos' ? ' active' : ''}`}
-          onClick={() => setActiveTab('pos')}
-        >
-          <ShoppingCart size={14} />
-          Enregistrement de vente
-          {cart.length > 0 && <span className="tab-count">{cart.reduce((a, i) => a + i.quantity, 0)}</span>}
-        </button>
-        <button
-          type="button"
-          className={`tab-btn${activeTab === 'history' ? ' active' : ''}`}
-          onClick={() => setActiveTab('history')}
-        >
-          <Receipt size={14} />
-          Journal des ventes
-          <span className="tab-count">{salesHistory.length}</span>
-        </button>
+      {/* Onglets et Sélecteur de Mode */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+        <div className="tabs" style={{ margin: 0 }}>
+          <button
+            type="button"
+            className={`tab-btn${activeTab === 'pos' ? ' active' : ''}`}
+            onClick={() => setActiveTab('pos')}
+          >
+            <ShoppingCart size={15} />
+            Caisse Enregistreuse & POS
+            {cart.length > 0 && <span className="tab-count">{cart.reduce((a, i) => a + i.quantity, 0)}</span>}
+          </button>
+          <button
+            type="button"
+            className={`tab-btn${activeTab === 'history' ? ' active' : ''}`}
+            onClick={() => setActiveTab('history')}
+          >
+            <Receipt size={15} />
+            Journal des Ventes
+            <span className="tab-count">{salesHistory.length}</span>
+          </button>
+        </div>
+
+        <div>
+          {isPosCashier ? (
+            <a
+              href="/sales"
+              className="btn btn-secondary"
+              style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              Afficher Menu Complet & Navigation
+            </a>
+          ) : (
+            <a
+              href="/sales?posMode=cashier"
+              className="btn btn-secondary"
+              style={{
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: '#F0FDF4',
+                borderColor: '#BBF7D0',
+                color: '#166534',
+                fontWeight: 600
+              }}
+            >
+              Mode Caisse Épuré (Plein Écran)
+            </a>
+          )}
+        </div>
       </div>
 
       {activeTab === 'pos' ? (

@@ -6,13 +6,11 @@ import {
   Unlock,
   RefreshCw,
   AlertTriangle,
-  CheckCircle,
-  Wifi,
-  WifiOff,
   Shield,
   Laptop,
-  Globe,
   Radio,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 import { ApiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -39,7 +37,7 @@ export const TerminalsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedTerminal, setSelectedTerminal] = useState<Terminal | null>(null);
-  const [actionType, setActionType] = useState<'LOCK' | 'KILL' | null>(null);
+  const [actionType, setActionType] = useState<'LOCK' | 'KILL' | 'KILL_ALL' | null>(null);
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -50,46 +48,45 @@ export const TerminalsPage: React.FC = () => {
       const data = await ApiClient.getTerminals();
       setTerminals(data);
     } catch (err: any) {
-      // Éviter de spammer en cas d'erreur de polling
+      // Ignorer les erreurs passagères de polling
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    // Enregistrement immédiat du poste de travail pour supervision
-    ApiClient.sendHeartbeat({
-      terminalId: 'DESKTOP-CAISSE-01',
-      organizationId: user?.organizationId || '',
-      userId: user?.id,
-      clientType: 'DESKTOP_PYQT',
-    }).then(() => fetchTerminals()).catch(() => fetchTerminals());
+    fetchTerminals();
 
     if (!autoRefresh) return;
-    const interval = setInterval(fetchTerminals, 4000);
+    const interval = setInterval(fetchTerminals, 3000);
     return () => clearInterval(interval);
-  }, [autoRefresh, user]);
+  }, [autoRefresh]);
 
-  const handleOpenActionModal = (term: Terminal, type: 'LOCK' | 'KILL') => {
+  const handleOpenActionModal = (term: Terminal | null, type: 'LOCK' | 'KILL' | 'KILL_ALL') => {
     setSelectedTerminal(term);
     setActionType(type);
-    setReason(
-      type === 'KILL'
-        ? "Fermeture administrative ordonnée par la Direction (fin de journée ou alerte)."
-        : "Poste temporairement verrouillé pour contrôle de caisse."
-    );
+    if (type === 'KILL_ALL') {
+      setReason("Arrêt d'urgence de l'ensemble des caisses ordonné par la Direction.");
+    } else if (type === 'KILL') {
+      setReason("Fermeture administrative ordonnée par la Direction.");
+    } else {
+      setReason("Poste temporairement verrouillé pour vérification.");
+    }
   };
 
   const handleConfirmAction = async () => {
-    if (!selectedTerminal || !actionType) return;
+    if (!actionType) return;
     setSubmitting(true);
     try {
-      if (actionType === 'LOCK') {
+      if (actionType === 'KILL_ALL') {
+        await ApiClient.killTerminal('ALL', reason);
+        warning("Ordre d'extinction d'urgence transmis à toutes les caisses !");
+      } else if (actionType === 'LOCK' && selectedTerminal) {
         await ApiClient.lockTerminal(selectedTerminal.id, reason);
-        success(`Ordre de verrouillage transmis au poste ${selectedTerminal.id}`);
-      } else if (actionType === 'KILL') {
+        success(`Poste ${selectedTerminal.id} verrouillé avec succès.`);
+      } else if (actionType === 'KILL' && selectedTerminal) {
         await ApiClient.killTerminal(selectedTerminal.id, reason);
-        warning(`Ordre de fermeture immédiate (Killswitch) envoyé au terminal ${selectedTerminal.id}`);
+        warning(`Ordre de fermeture immédiate (Killswitch) envoyé au poste ${selectedTerminal.id}`);
       }
       setSelectedTerminal(null);
       setActionType(null);
@@ -98,21 +95,6 @@ export const TerminalsPage: React.FC = () => {
       error(err.message || "Erreur lors de l'exécution de la commande à distance.");
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleConnectDesktopTerminal = async () => {
-    try {
-      await ApiClient.sendHeartbeat({
-        terminalId: `DESKTOP-POS-${Math.floor(Math.random() * 90 + 10)}`,
-        organizationId: user?.organizationId || '',
-        userId: user?.id,
-        clientType: 'DESKTOP_PYQT',
-      });
-      success('Nouveau poste Windows connecté et enregistré dans la console !');
-      await fetchTerminals();
-    } catch (err: any) {
-      error('Erreur lors de la connexion du terminal.');
     }
   };
 
@@ -130,7 +112,7 @@ export const TerminalsPage: React.FC = () => {
     try {
       const ping = new Date(dateStr).getTime();
       const diffSec = Math.floor((Date.now() - ping) / 1000);
-      if (diffSec < 5) return 'À l\'instant (il y a ' + diffSec + 's)';
+      if (diffSec < 3) return 'En direct (<3s)';
       if (diffSec < 60) return `Il y a ${diffSec}s`;
       return `Il y a ${Math.floor(diffSec / 60)} min`;
     } catch {
@@ -138,141 +120,170 @@ export const TerminalsPage: React.FC = () => {
     }
   };
 
-  const onlineCount = terminals.filter((t) => t.status === 'ONLINE').length;
-  const lockedCount = terminals.filter((t) => t.status === 'LOCKED').length;
+  const onlineTerminals = terminals.filter((t) => t.status === 'ONLINE');
+  const lockedTerminals = terminals.filter((t) => t.status === 'LOCKED');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* En-tête KPI et Contrôle */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-          <div style={{
-            background: 'white',
-            padding: '12px 20px',
-            borderRadius: '8px',
-            border: '1px solid #E5E7EB',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#10B981', boxShadow: '0 0 8px #10B981' }} />
+      {/* Barre de contrôle supérieure */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '12px',
+        background: 'white',
+        padding: '16px 20px',
+        borderRadius: '12px',
+        border: '1px solid #E2E8F0',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      }}>
+        <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Postes Actifs */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              background: onlineTerminals.length > 0 ? '#10B981' : '#94A3B8',
+              boxShadow: onlineTerminals.length > 0 ? '0 0 10px #10B981' : 'none'
+            }} />
             <div>
-              <div style={{ fontSize: '11px', color: '#6B7280', textTransform: 'uppercase', fontWeight: 600 }}>Postes Actifs</div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>{onlineCount}</div>
-            </div>
-          </div>
-
-          <div style={{
-            background: 'white',
-            padding: '12px 20px',
-            borderRadius: '8px',
-            border: '1px solid #E5E7EB',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#F59E0B' }} />
-            <div>
-              <div style={{ fontSize: '11px', color: '#6B7280', textTransform: 'uppercase', fontWeight: 600 }}>Postes Verrouillés</div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>{lockedCount}</div>
-            </div>
-          </div>
-
-          <div style={{
-            background: 'white',
-            padding: '12px 20px',
-            borderRadius: '8px',
-            border: '1px solid #E5E7EB',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
-            <Radio size={18} color="#2563EB" />
-            <div>
-              <div style={{ fontSize: '11px', color: '#6B7280', textTransform: 'uppercase', fontWeight: 600 }}>Supervision Réseau</div>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: '#2563EB' }}>
-                {autoRefresh ? 'Temps Réel (4s)' : 'Pause'}
+              <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
+                Caisses En Ligne
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#0F172A' }}>
+                {onlineTerminals.length}
               </div>
             </div>
           </div>
+
+          <div style={{ width: 1, height: 32, background: '#E2E8F0' }} />
+
+          {/* Postes Verrouillés */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              background: lockedTerminals.length > 0 ? '#F59E0B' : '#CBD5E1',
+            }} />
+            <div>
+              <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
+                Verrouillés
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#0F172A' }}>
+                {lockedTerminals.length}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ width: 1, height: 32, background: '#E2E8F0' }} />
+
+          {/* Synchronisation en temps réel */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Radio size={16} color="#0284C7" className={autoRefresh ? 'spin' : ''} />
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#0369A1' }}>
+              Supervision Directe (3s)
+            </span>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            type="button"
-            onClick={handleConnectDesktopTerminal}
-            className="btn btn-primary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <Monitor size={15} /> Connecter Poste Caisse
-          </button>
+        {/* Boutons d'actions */}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {/* Bouton d'arrêt d'urgence général */}
+          {onlineTerminals.length > 0 && (
+            <button
+              type="button"
+              onClick={() => handleOpenActionModal(null, 'KILL_ALL')}
+              className="btn"
+              style={{
+                background: '#DC2626',
+                color: 'white',
+                border: 'none',
+                fontWeight: 700,
+                fontSize: '13px',
+                padding: '8px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 4px rgba(220, 38, 38, 0.2)'
+              }}
+            >
+              <Power size={16} /> Arrêter Toutes les Caisses
+            </button>
+          )}
+
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
             className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
           >
-            <RefreshCw size={15} className={autoRefresh ? 'spin' : ''} />
-            {autoRefresh ? 'Désactiver Actualisation Auto' : 'Activer Temps Réel'}
+            <RefreshCw size={14} className={autoRefresh ? 'spin' : ''} />
+            {autoRefresh ? 'Pause' : 'Activer Direct'}
           </button>
+
           <button
             onClick={fetchTerminals}
             className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{ fontSize: '13px' }}
           >
             Actualiser
           </button>
         </div>
       </div>
 
-      {/* Guide informatif */}
+      {/* Guide clair */}
       <div style={{
-        background: '#EFF6FF',
-        border: '1px solid #BFDBFE',
-        borderRadius: '8px',
-        padding: '12px 16px',
+        background: '#F0F9FF',
+        border: '1px solid #BAE6FD',
+        borderRadius: '10px',
+        padding: '12px 18px',
         display: 'flex',
         alignItems: 'center',
         gap: '12px',
-        color: '#1E40AF',
+        color: '#0369A1',
         fontSize: '13px',
       }}>
-        <Shield size={20} color="#2563EB" style={{ flexShrink: 0 }} />
+        <Shield size={20} color="#0284C7" style={{ flexShrink: 0 }} />
         <div>
-          <b>Module de Supervision & Sécurité Distante :</b> En tant que Manager ou Propriétaire,
-          vous pouvez superviser l'ensemble des caisses et postes Windows connectés, verrouiller un poste en cours de vente,
-          ou ordonner l'<b>extinction et la fermeture immédiate à distance (Kill switch)</b> de l'application desktop.
+          <b>Supervision & Contrôle à Distance :</b> Cet écran vous permet de surveiller en direct l'état des postes caisse Windows connectés.
+          Vous pouvez <b>fermer instantanément le logiciel à distance</b> ou <b>verrouiller l'écran de caisse</b> en 1 clic.
         </div>
       </div>
 
-      {/* Tableau des terminaux */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* Liste des postes de caisse */}
+      <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid #E2E8F0', borderRadius: '12px' }}>
         <table className="table" style={{ margin: 0 }}>
-          <thead>
+          <thead style={{ background: '#F8FAFC' }}>
             <tr>
-              <th>Poste / Machine</th>
+              <th style={{ padding: '14px 18px' }}>Poste de Travail</th>
               <th>Type de Client</th>
-              <th>Utilisateur Connecté</th>
+              <th>Utilisateur & Rôle</th>
               <th>Adresse IP</th>
               <th>Dernier Signal</th>
-              <th>Statut</th>
-              <th style={{ textAlign: 'right' }}>Actions de Contrôle</th>
+              <th>État</th>
+              <th style={{ textAlign: 'right', paddingRight: '18px' }}>Actions de Contrôle</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: '#6B7280' }}>
-                  Recherche des terminaux connectés...
+                <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>
+                  Recherche des postes connectés...
                 </td>
               </tr>
             ) : terminals.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#6B7280' }}>
-                  <Monitor size={36} color="#9CA3AF" style={{ margin: '0 auto 10px', display: 'block' }} />
-                  Aucun poste de caisse ou terminal desktop actif pour le moment.<br />
-                  <span style={{ fontSize: '12px', color: '#9CA3AF' }}>
-                    Lancez l'application desktop (<code>python main.py</code>) pour voir le poste apparaître ici en direct.
-                  </span>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '48px 20px', color: '#64748B' }}>
+                  <Monitor size={42} color="#94A3B8" style={{ margin: '0 auto 12px', display: 'block' }} />
+                  <div style={{ fontSize: '15px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                    Aucune caisse connectée actuellement
+                  </div>
+                  <p style={{ fontSize: '13px', color: '#64748B', maxWidth: '500px', margin: '0 auto' }}>
+                    Pour connecter un poste caisse, lancez le fichier <b>LANCER_DESKTOP.bat</b> sur la machine Windows.
+                    Le poste s'affichera ici en direct avec son identifiant matériel.
+                  </p>
                 </td>
               </tr>
             ) : (
@@ -281,46 +292,75 @@ export const TerminalsPage: React.FC = () => {
                 const isLocked = term.status === 'LOCKED';
 
                 return (
-                  <tr key={term.id} style={{ background: isLocked ? '#FFFBEB' : undefined }}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
-                        <Monitor size={16} color={isOnline ? '#10B981' : isLocked ? '#F59E0B' : '#6B7280'} />
-                        <span>{term.id}</span>
+                  <tr
+                    key={term.id}
+                    style={{
+                      background: isLocked ? '#FFFBEB' : undefined,
+                      borderBottom: '1px solid #F1F5F9'
+                    }}
+                  >
+                    <td style={{ padding: '14px 18px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                          background: isOnline ? '#DCFCE7' : isLocked ? '#FEF3C7' : '#F1F5F9',
+                          padding: '8px',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
+                          <Laptop size={18} color={isOnline ? '#16A34A' : isLocked ? '#D97706' : '#64748B'} />
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '14px' }}>
+                            {term.id}
+                          </div>
+                          {term.cashSessionId ? (
+                            <span style={{ fontSize: '11px', color: '#059669', fontWeight: 600 }}>
+                              Caisse ouverte (#{term.cashSessionId.slice(0, 8)})
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#64748B' }}>
+                              Prêt pour vente
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      {term.cashSessionId && (
-                        <span style={{ fontSize: '11px', color: '#059669', display: 'block', marginTop: '2px' }}>
-                          Caisse active : #{term.cashSessionId.slice(0, 8)}
-                        </span>
-                      )}
                     </td>
+
                     <td>
                       <span style={{
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '4px',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
+                        gap: '6px',
+                        background: '#EEF2FF',
+                        color: '#4338CA',
                         fontSize: '11px',
-                        background: term.clientType === 'DESKTOP_PYQT' ? '#EEF2FF' : '#F3F4F6',
-                        color: term.clientType === 'DESKTOP_PYQT' ? '#4F46E5' : '#374151',
-                        fontWeight: 600,
+                        fontWeight: 700,
+                        padding: '4px 10px',
+                        borderRadius: '12px'
                       }}>
-                        {term.clientType === 'DESKTOP_PYQT' ? <Laptop size={12} /> : <Globe size={12} />}
-                        {term.clientType === 'DESKTOP_PYQT' ? 'Windows Desktop (Qt)' : 'Navigateur Web'}
+                        {term.clientType === 'DESKTOP_PYQT' ? 'Windows Natif (PyQt6)' : 'Navigateur Web'}
                       </span>
                     </td>
+
                     <td>
-                      <div style={{ fontWeight: 500, color: '#111827' }}>{term.userName}</div>
-                      <span style={{ fontSize: '11px', color: '#6B7280' }}>{term.userRole}</span>
+                      <div style={{ fontWeight: 600, color: '#1E293B', fontSize: '13px' }}>
+                        {term.userName || 'Non assigné'}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748B' }}>
+                        {term.userRole}
+                      </div>
                     </td>
-                    <td>
-                      <code style={{ fontSize: '12px', background: '#F1F5F9', padding: '2px 6px', borderRadius: '4px' }}>
-                        {term.ipAddress}
-                      </code>
+
+                    <td style={{ fontSize: '12px', fontFamily: 'monospace', color: '#475569' }}>
+                      {term.ipAddress}
                     </td>
-                    <td style={{ fontSize: '12px', color: '#4B5563' }}>
+
+                    <td style={{ fontSize: '12px', color: '#475569' }}>
                       {formatLastPing(term.lastPing)}
                     </td>
+
                     <td>
                       {isOnline && (
                         <span style={{
@@ -329,10 +369,10 @@ export const TerminalsPage: React.FC = () => {
                           gap: '6px',
                           color: '#166534',
                           background: '#DCFCE7',
-                          padding: '3px 8px',
-                          borderRadius: '12px',
-                          fontSize: '11px',
-                          fontWeight: 600,
+                          padding: '4px 10px',
+                          borderRadius: '16px',
+                          fontSize: '12px',
+                          fontWeight: 700,
                         }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16A34A' }} />
                           En Ligne
@@ -345,10 +385,10 @@ export const TerminalsPage: React.FC = () => {
                           gap: '6px',
                           color: '#92400E',
                           background: '#FEF3C7',
-                          padding: '3px 8px',
-                          borderRadius: '12px',
-                          fontSize: '11px',
-                          fontWeight: 600,
+                          padding: '4px 10px',
+                          borderRadius: '16px',
+                          fontSize: '12px',
+                          fontWeight: 700,
                         }}>
                           <Lock size={12} />
                           Verrouillé
@@ -359,52 +399,55 @@ export const TerminalsPage: React.FC = () => {
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '6px',
-                          color: '#4B5563',
-                          background: '#F3F4F6',
-                          padding: '3px 8px',
-                          borderRadius: '12px',
-                          fontSize: '11px',
+                          color: '#475569',
+                          background: '#F1F5F9',
+                          padding: '4px 10px',
+                          borderRadius: '16px',
+                          fontSize: '12px',
                           fontWeight: 600,
                         }}>
                           Déconnecté
                         </span>
                       )}
                     </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: '6px' }}>
+
+                    <td style={{ textAlign: 'right', paddingRight: '18px' }}>
+                      <div style={{ display: 'inline-flex', gap: '8px' }}>
                         {isLocked ? (
                           <button
                             onClick={() => handleUnlock(term.id)}
                             className="btn btn-secondary"
                             style={{
-                              padding: '4px 10px',
+                              padding: '6px 12px',
                               fontSize: '12px',
+                              fontWeight: 600,
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
+                              gap: '6px',
                               color: '#059669',
+                              borderColor: '#A7F3D0',
+                              background: '#ECFDF5'
                             }}
-                            title="Déverrouiller le poste"
                           >
-                            <Unlock size={13} />
-                            Déverrouiller
+                            <Unlock size={14} /> Déverrouiller
                           </button>
                         ) : (
                           <button
                             onClick={() => handleOpenActionModal(term, 'LOCK')}
                             className="btn btn-secondary"
                             style={{
-                              padding: '4px 10px',
+                              padding: '6px 12px',
                               fontSize: '12px',
+                              fontWeight: 600,
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
+                              gap: '6px',
                               color: '#D97706',
+                              borderColor: '#FDE68A',
+                              background: '#FFFBEB'
                             }}
-                            title="Verrouiller l'écran à distance"
                           >
-                            <Lock size={13} />
-                            Verrouiller
+                            <Lock size={14} /> Verrouiller
                           </button>
                         )}
 
@@ -412,19 +455,18 @@ export const TerminalsPage: React.FC = () => {
                           onClick={() => handleOpenActionModal(term, 'KILL')}
                           className="btn"
                           style={{
-                            padding: '4px 10px',
+                            padding: '6px 12px',
                             fontSize: '12px',
+                            fontWeight: 700,
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '4px',
+                            gap: '6px',
                             background: '#DC2626',
                             color: 'white',
                             border: 'none',
                           }}
-                          title="Fermer l'application à distance"
                         >
-                          <Power size={13} />
-                          Fermer à distance
+                          <Power size={14} /> Fermer à distance
                         </button>
                       </div>
                     </td>
@@ -436,58 +478,65 @@ export const TerminalsPage: React.FC = () => {
         </table>
       </div>
 
-      {/* Modal de Confirmation d'Action (Lock ou Kill) */}
-      {selectedTerminal && actionType && (
+      {/* Modal de Confirmation d'Action (Lock, Kill individuel ou Arrêt d'Urgence Global) */}
+      {actionType && (
         <div className="modal-backdrop">
-          <div className="modal" style={{ maxWidth: '500px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-              {actionType === 'KILL' ? (
-                <div style={{ background: '#FEE2E2', padding: '10px', borderRadius: '50%', color: '#DC2626' }}>
-                  <Power size={24} />
-                </div>
-              ) : (
+          <div className="modal" style={{ maxWidth: '480px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+              {actionType === 'LOCK' ? (
                 <div style={{ background: '#FEF3C7', padding: '10px', borderRadius: '50%', color: '#D97706' }}>
                   <Lock size={24} />
                 </div>
+              ) : (
+                <div style={{ background: '#FEE2E2', padding: '10px', borderRadius: '50%', color: '#DC2626' }}>
+                  <Power size={24} />
+                </div>
               )}
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
-                  {actionType === 'KILL'
-                    ? 'Fermer le logiciel à distance (Killswitch)'
-                    : 'Verrouiller le poste à distance'}
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>
+                  {actionType === 'KILL_ALL'
+                    ? "Arrêt d'Urgence de Toutes les Caisses"
+                    : actionType === 'KILL'
+                    ? 'Fermer le Logiciel à Distance'
+                    : 'Verrouiller le Poste'}
                 </h3>
-                <span style={{ fontSize: '12px', color: '#6B7280' }}>
-                  Cible : <b>{selectedTerminal.id}</b> ({selectedTerminal.userName})
+                <span style={{ fontSize: '12px', color: '#64748B' }}>
+                  {actionType === 'KILL_ALL'
+                    ? "Tous les postes de caisse Windows connectés"
+                    : `Poste cible : ${selectedTerminal?.id}`}
                 </span>
               </div>
             </div>
 
-            <p style={{ fontSize: '13px', color: '#4B5563', lineHeight: 1.5 }}>
-              {actionType === 'KILL' ? (
+            <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>
+              {actionType === 'KILL_ALL' ? (
                 <>
-                  <span style={{ color: '#DC2626', fontWeight: 600 }}>Attention :</span> Cette action ordonne la{' '}
-                  <b>fermeture immédiate et l'extinction</b> de l'application desktop sur la machine de la caisse.
-                  Toute session en cours sera interrompue.
+                  <b style={{ color: '#DC2626' }}>Attention :</b> Cette commande transmet un ordre d'arrêt immédiat
+                  (Killswitch) à <b>toutes les caisses actives</b>. L'application desktop de chaque caissier se fermera instantanément.
+                </>
+              ) : actionType === 'KILL' ? (
+                <>
+                  Cette commande ordonne l'<b>extinction immédiate</b> de l'application desktop sur le poste cible.
+                  L'application se fermera automatiquement sur l'écran du caissier.
                 </>
               ) : (
                 <>
-                  Cette action affiche un écran de verrouillage bloquant sur le poste cible. L'opérateur ne pourra plus
-                  effectuer de vente jusqu'au déverrouillage par un manager.
+                  Un écran de sécurité bloquant s'affichera immédiatement sur le poste. L'opérateur ne pourra plus manipuler la caisse.
                 </>
               )}
             </p>
 
             <div style={{ marginTop: '14px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#374151' }}>
-                Motif transmis au terminal :
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#334155' }}>
+                Motif administratif :
               </label>
               <textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                rows={3}
+                rows={2}
                 className="input"
-                style={{ width: '100%', resize: 'vertical', fontSize: '13px' }}
-                placeholder="Raison de la fermeture ou du verrouillage..."
+                style={{ width: '100%', resize: 'none', fontSize: '13px' }}
+                placeholder="Raison de la fermeture..."
               />
             </div>
 
@@ -509,23 +558,24 @@ export const TerminalsPage: React.FC = () => {
                 disabled={submitting}
                 className="btn"
                 style={{
-                  background: actionType === 'KILL' ? '#DC2626' : '#D97706',
+                  background: actionType === 'LOCK' ? '#D97706' : '#DC2626',
                   color: 'white',
                   border: 'none',
+                  fontWeight: 700,
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
                 }}
               >
                 {submitting ? (
-                  'Transmission...'
-                ) : actionType === 'KILL' ? (
+                  'Exécution...'
+                ) : actionType === 'LOCK' ? (
                   <>
-                    <Power size={14} /> Exécuter la Fermeture Forcée
+                    <Lock size={15} /> Confirmer le Verrouillage
                   </>
                 ) : (
                   <>
-                    <Lock size={14} /> Confirmer le Verrouillage
+                    <Power size={15} /> Exécuter la Fermeture Forcée
                   </>
                 )}
               </button>

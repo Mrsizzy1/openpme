@@ -1,12 +1,21 @@
 @echo off
 title Smart PME Finance - Poste Desktop Windows
 cd /d "%~dp0"
+
 echo ============================================================
 echo   Lancement de Smart PME Finance - Poste Desktop (PyQt6)
 echo ============================================================
-python apps\desktop-py\main.py
+
+set "PY_EXE=C:\Program Files\Python314\python.exe"
+if not exist "%PY_EXE%" (
+    set "PY_EXE=python"
+)
+
+"%PY_EXE%" apps\desktop-py\main.py
 if errorlevel 1 (
     echo.
-    echo Une erreur est survenue lors de l'execution.
+    echo Erreur lors du lancement avec %PY_EXE%.
+    echo Tentative avec le python standard...
+    python apps\desktop-py\main.py
     pause
 )

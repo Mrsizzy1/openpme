@@ -91,4 +91,16 @@ export class RemoteControlController {
   ) {
     return this.remoteControlService.killTerminal(orgId, terminalId, body?.reason);
   }
+
+  /**
+   * Notification de déconnexion volontaire ou forcée d'un terminal
+   */
+  @Post('terminals/:id/logout')
+  @ApiOperation({ summary: 'Déconnecter le terminal et fermer la session active' })
+  async logoutTerminal(
+    @Param('id') terminalId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.remoteControlService.logoutTerminal(terminalId, body?.reason);
+  }
 }

@@ -7,6 +7,11 @@ echo             SMART PME FINANCE (OPENPME) - DEMARRAGE COMPLET
 echo ====================================================================
 echo.
 
+set "PY_EXE=C:\Program Files\Python314\python.exe"
+if not exist "%PY_EXE%" (
+    set "PY_EXE=python"
+)
+
 echo [1/3] Demarrage du Serveur Backend API NestJS (Port 3001)...
 start "Smart PME - API Backend (Port 3001)" cmd /k "npm run dev:api"
 
@@ -18,7 +23,7 @@ start "Smart PME - Web Frontend (Port 5173)" cmd /k "npm run dev:web"
 timeout /t 3 /nobreak >nul
 
 echo [3/3] Lancement de l'Application Desktop Windows (PyQt6)...
-start "Smart PME - Poste Desktop Windows" cmd /k "python apps\desktop-py\main.py"
+start "Smart PME - Poste Desktop Windows" cmd /k ""%PY_EXE%" apps\desktop-py\main.py"
 
 echo.
 echo ====================================================================
