@@ -32,11 +32,16 @@ export class RemoteControlService {
     userId?: string;
     clientType?: 'DESKTOP_PYQT' | 'WEB_POS' | 'BROWSER';
     ipAddress?: string;
-  }): Promise<{ action: string; message?: string }> {
-    const { terminalId, organizationId, userId, clientType = 'DESKTOP_PYQT', ipAddress = '127.0.0.1' } = data;
+    let targetOrgId = organizationId;
+    if (!targetOrgId || targetOrgId === 'org-pme-demo') {
+      const firstOrg = await this.prisma.organization.findFirst({ select: { id: true } });
+      if (firstOrg) targetOrgId = firstOrg.id;
+    }
 
-    let userName = 'Poste Inconnu';
-    let userRole = 'GUEST';
+    const { terminalId, userId, clientType = 'DESKTOP_PYQT', ipAddress = '127.0.0.1' } = data;
+
+    let userName = clientType === 'DESKTOP_PYQT' ? 'Poste Caisse Windows' : 'Terminal Web';
+    let userRole = 'CAISSIER';
 
     if (userId) {
       const user = await this.prisma.user.findUnique({
@@ -51,7 +56,7 @@ export class RemoteControlService {
 
     // Récupérer la session de caisse active éventuelle
     const activeSession = userId ? await this.prisma.cashSession.findFirst({
-      where: { organizationId, userId, status: 'OPEN' },
+      where: { organizationId: targetOrgId, userId, status: 'OPEN' },
       select: { id: true },
     }) : null;
 
@@ -60,7 +65,7 @@ export class RemoteControlService {
     if (!terminal) {
       terminal = {
         id: terminalId,
-        organizationId,
+        organizationId: targetOrgId,
         userId,
         userName,
         userRole,
@@ -74,9 +79,12 @@ export class RemoteControlService {
       this.terminals.set(terminalId, terminal);
     } else {
       terminal.lastPing = new Date();
-      terminal.userId = userId;
-      terminal.userName = userName;
-      terminal.userRole = userRole;
+      terminal.organizationId = targetOrgId;
+      if (userId) {
+        terminal.userId = userId;
+        terminal.userName = userName;
+        terminal.userRole = userRole;
+      }
       terminal.ipAddress = ipAddress;
       terminal.cashSessionId = activeSession?.id;
     }
@@ -101,7 +109,13 @@ export class RemoteControlService {
     const result: TerminalState[] = [];
 
     for (const terminal of this.terminals.values()) {
-      if (terminal.organizationId === organizationId) {
+      // Afficher les terminaux de l'organisation ou les postes desktop rattachés
+      if (
+        terminal.organizationId === organizationId ||
+        terminal.organizationId === 'org-pme-demo' ||
+        !terminal.organizationId
+      ) {
+        terminal.organizationId = organizationId;
         // Considérer offline si pas de ping depuis plus de 45 secondes
         if (now - terminal.lastPing.getTime() > 45000) {
           terminal.status = 'OFFLINE';

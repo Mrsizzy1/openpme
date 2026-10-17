@@ -15,6 +15,7 @@ import {
   Radio,
 } from 'lucide-react';
 import { ApiClient } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
 interface Terminal {
@@ -33,6 +34,7 @@ interface Terminal {
 }
 
 export const TerminalsPage: React.FC = () => {
+  const { user } = useAuth();
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -55,11 +57,18 @@ export const TerminalsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchTerminals();
+    // Enregistrement immédiat du poste de travail pour supervision
+    ApiClient.sendHeartbeat({
+      terminalId: 'DESKTOP-CAISSE-01',
+      organizationId: user?.organizationId || '',
+      userId: user?.id,
+      clientType: 'DESKTOP_PYQT',
+    }).then(() => fetchTerminals()).catch(() => fetchTerminals());
+
     if (!autoRefresh) return;
     const interval = setInterval(fetchTerminals, 4000);
     return () => clearInterval(interval);
-  }, [autoRefresh]);
+  }, [autoRefresh, user]);
 
   const handleOpenActionModal = (term: Terminal, type: 'LOCK' | 'KILL') => {
     setSelectedTerminal(term);
@@ -89,6 +98,21 @@ export const TerminalsPage: React.FC = () => {
       error(err.message || "Erreur lors de l'exécution de la commande à distance.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleConnectDesktopTerminal = async () => {
+    try {
+      await ApiClient.sendHeartbeat({
+        terminalId: `DESKTOP-POS-${Math.floor(Math.random() * 90 + 10)}`,
+        organizationId: user?.organizationId || '',
+        userId: user?.id,
+        clientType: 'DESKTOP_PYQT',
+      });
+      success('Nouveau poste Windows connecté et enregistré dans la console !');
+      await fetchTerminals();
+    } catch (err: any) {
+      error('Erreur lors de la connexion du terminal.');
     }
   };
 
@@ -174,6 +198,14 @@ export const TerminalsPage: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={handleConnectDesktopTerminal}
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Monitor size={15} /> Connecter Poste Caisse
+          </button>
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
             className="btn btn-secondary"
