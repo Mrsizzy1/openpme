@@ -373,6 +373,66 @@ export class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  // Mobile Money Payments (M-Pesa, Airtel, Orange)
+  static initiateMobileMoney(data: {
+    operator?: 'MPESA' | 'AIRTEL' | 'ORANGE';
+    phoneNumber: string;
+    amount: number;
+    currency: 'CDF' | 'USD';
+    invoiceId?: string;
+  }) {
+    return this.request<any>('/payments/mobile-money/initiate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static checkMobileMoneyStatus(reference: string) {
+    return this.request<any>(`/payments/mobile-money/status/${reference}`);
+  }
+
+  static confirmMobileMoney(reference: string, invoiceId?: string) {
+    return this.request<any>('/payments/mobile-money/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ reference, invoiceId }),
+    });
+  }
+
+  // Manager Alerts & Daily Notifications (WhatsApp & Telegram)
+  static testTelegramAlert(botToken: string, chatId: string) {
+    return this.request<any>('/notifications/telegram/test', {
+      method: 'POST',
+      body: JSON.stringify({ botToken, chatId }),
+    });
+  }
+
+  static generateDailyReport(options: {
+    date?: string;
+    whatsappPhone?: string;
+    telegramBotToken?: string;
+    telegramChatId?: string;
+  }) {
+    return this.request<any>('/notifications/daily-report', {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
+  }
+
+  static sendCriticalAlert(data: {
+    title: string;
+    details: string;
+    operator: string;
+    whatsappPhone?: string;
+    telegramBotToken?: string;
+    telegramChatId?: string;
+  }) {
+    return this.request<any>('/notifications/alert', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
 }
+
 
 

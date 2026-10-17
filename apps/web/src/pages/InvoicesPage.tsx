@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { exportToCsv } from '../utils/exportCsv';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
+import { printThermalReceiptWeb } from '../utils/escpos';
 
 const statusLabels: Record<string, string> = {
   PAID: 'Payée',
@@ -403,10 +404,41 @@ export const InvoicesPage: React.FC = () => {
                   onClick={() => handleShareWhatsApp(selectedInvoice)}
                   title="Partager la facture sur WhatsApp"
                 >
-                  <Share2 size={14} /> Envoyer sur WhatsApp
+                  <Share2 size={14} /> WhatsApp
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  onClick={() => {
+                    if (!selectedInvoice) return;
+                    printThermalReceiptWeb({
+                      companyName: organization?.name || 'Smart PME Finance',
+                      companyAddress: organization?.address,
+                      companyPhone: organization?.phone,
+                      companyNif: organization?.taxId,
+                      receiptNumber: selectedInvoice.invoiceNumber,
+                      date: new Date(selectedInvoice.issueDate || selectedInvoice.createdAt).toLocaleString('fr-FR'),
+                      customerName: selectedInvoice.customer?.name,
+                      items: (selectedInvoice.items || []).map((i: any) => ({
+                        name: i.description || i.product?.name || 'Article',
+                        quantity: Number(i.quantity || 1),
+                        unitPrice: Number(i.unitPrice || 0),
+                        total: Number(i.total || (i.quantity * i.unitPrice) || 0),
+                      })),
+                      subtotal: Number(selectedInvoice.subtotal || selectedInvoice.total),
+                      taxAmount: Number(selectedInvoice.taxAmount || 0),
+                      total: Number(selectedInvoice.total),
+                      currency: selectedInvoice.currency || 'CDF',
+                      paymentMethod: selectedInvoice.status === 'PAID' ? 'RÉGLÉ' : 'EN COURS',
+                    }, { width: '80mm' });
+                  }}
+                  title="Imprimer un ticket thermique ESC/POS 80mm"
+                >
+                  <Printer size={14} /> Ticket 80mm
                 </button>
                 <button type="button" className="btn btn-primary" onClick={() => window.print()}>
-                  <Printer size={14} /> Imprimer
+                  <Printer size={14} /> Imprimer A4
                 </button>
               </div>
             </div>
@@ -484,8 +516,9 @@ export const InvoicesPage: React.FC = () => {
                   >
                     <option value="CASH">Espèces</option>
                     <option value="BANK_TRANSFER">Virement bancaire</option>
-                    <option value="MOBILE_MONEY_MPESA">M-Pesa Vodacom</option>
+                    <option value="MOBILE_MONEY_MPESA">Vodacom M-Pesa</option>
                     <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
+                    <option value="MOBILE_MONEY_ORANGE">Orange Money</option>
                     <option value="CHECK">Chèque</option>
                   </select>
                 </div>

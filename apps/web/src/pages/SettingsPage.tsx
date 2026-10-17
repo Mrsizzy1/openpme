@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
-import { Building2, Save, DollarSign, Sliders, ShieldAlert, FileText, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Building2, Save, DollarSign, Sliders, ShieldAlert, FileText, AlertTriangle, CheckCircle, Bell, MessageSquare, Send } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -37,6 +37,68 @@ export const SettingsPage: React.FC = () => {
   // Mentions légales
   const [invoiceFooterNote, setInvoiceFooterNote] = useState('');
   const [bankDetails, setBankDetails] = useState('');
+
+  // Notifications & Alertes Dirigeant (WhatsApp & Telegram)
+  const [managerWhatsapp, setManagerWhatsapp] = useState('');
+  const [telegramBotToken, setTelegramBotToken] = useState('');
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [testingTelegram, setTestingTelegram] = useState(false);
+  const [testingReport, setTestingReport] = useState(false);
+
+  useEffect(() => {
+    const savedTgToken = localStorage.getItem('smart_pme_tg_token') || '';
+    const savedTgChatId = localStorage.getItem('smart_pme_tg_chat_id') || '';
+    const savedWa = localStorage.getItem('smart_pme_manager_wa') || '';
+    setTelegramBotToken(savedTgToken);
+    setTelegramChatId(savedTgChatId);
+    setManagerWhatsapp(savedWa);
+  }, []);
+
+  const handleTestTelegram = async () => {
+    if (!telegramBotToken || !telegramChatId) {
+      toastError('Veuillez renseigner le Bot Token et le Chat ID Telegram.');
+      return;
+    }
+    setTestingTelegram(true);
+    try {
+      localStorage.setItem('smart_pme_tg_token', telegramBotToken);
+      localStorage.setItem('smart_pme_tg_chat_id', telegramChatId);
+      const res = await ApiClient.testTelegramAlert(telegramBotToken, telegramChatId);
+      if (res.success) {
+        success('Message test envoyé avec succès sur Telegram !');
+      } else {
+        toastError(res.error || 'Erreur lors de l\'envoi Telegram.');
+      }
+    } catch (err: any) {
+      toastError(err.message || 'Impossible de joindre l\'API Telegram.');
+    } finally {
+      setTestingTelegram(false);
+    }
+  };
+
+  const handleTestDailyReport = async () => {
+    setTestingReport(true);
+    try {
+      if (managerWhatsapp) localStorage.setItem('smart_pme_manager_wa', managerWhatsapp);
+      const res = await ApiClient.generateDailyReport({
+        whatsappPhone: managerWhatsapp || undefined,
+        telegramBotToken: telegramBotToken || undefined,
+        telegramChatId: telegramChatId || undefined,
+      });
+
+      if (res.telegramSent) {
+        success('Rapport de synthèse transmis sur Telegram !');
+      }
+      if (res.whatsappUrl) {
+        window.open(res.whatsappUrl, '_blank');
+        success('Aperçu du rapport ouvert pour WhatsApp.');
+      }
+    } catch (err: any) {
+      toastError(err.message || 'Erreur lors de la génération du rapport.');
+    } finally {
+      setTestingReport(false);
+    }
+  };
 
   useEffect(() => {
     if (organization) {
@@ -333,6 +395,83 @@ export const SettingsPage: React.FC = () => {
                 onChange={(e) => setBankDetails(e.target.value)}
                 style={{ resize: 'vertical' }}
               />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Section 5 : Alertes Dirigeant WhatsApp & Telegram ── */}
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <div className="card-body">
+            <SectionTitle icon={<Bell size={16} />} label="Alertes instantanées Dirigeant & Clôture WhatsApp / Telegram" />
+            
+            <p style={{ fontSize: '0.8125rem', color: '#6B7280', marginBottom: '16px' }}>
+              Recevez les alertes en cas de fraude, d'écart de caisse ou de fermeture d'urgence (Killswitch), ainsi que le rapport de clôture automatique à 20h00 directement sur votre smartphone.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-wa">N° WhatsApp du Gérant / Propriétaire</label>
+                <input
+                  id="set-wa"
+                  type="tel"
+                  className="input-field"
+                  placeholder="ex : +243812345678"
+                  value={managerWhatsapp}
+                  onChange={(e) => setManagerWhatsapp(e.target.value)}
+                />
+                <div className="form-hint">Format international avec indicatif pays (+243...)</div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-tg-token">Telegram Bot Token (Optionnel)</label>
+                <input
+                  id="set-tg-token"
+                  type="text"
+                  className="input-field"
+                  placeholder="ex : 123456789:ABCdefGhIJKlmNoPQRstuVWXyz"
+                  value={telegramBotToken}
+                  onChange={(e) => setTelegramBotToken(e.target.value)}
+                />
+                <div className="form-hint">Créé via @BotFather sur Telegram</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-tg-chat">Telegram Chat ID / Canal Privé</label>
+                <input
+                  id="set-tg-chat"
+                  type="text"
+                  className="input-field"
+                  placeholder="ex : 987654321 ou @mon_canal_pme"
+                  value={telegramChatId}
+                  onChange={(e) => setTelegramChatId(e.target.value)}
+                />
+                <div className="form-hint">ID de votre compte ou de votre groupe de direction</div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={handleTestTelegram}
+                  disabled={testingTelegram}
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Send size={14} />
+                  {testingTelegram ? 'Test en cours...' : 'Tester le Bot Telegram'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestDailyReport}
+                  disabled={testingReport}
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <MessageSquare size={14} />
+                  {testingReport ? 'Génération...' : 'Aperçu Clôture WhatsApp'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

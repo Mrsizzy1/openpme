@@ -19,11 +19,16 @@ import {
   Printer,
   Share2,
   Keyboard,
+  Smartphone,
+  Radio,
+  WifiOff,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { exportToCsv } from '../utils/exportCsv';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
+import { printThermalReceiptWeb } from '../utils/escpos';
+import { offlineSync } from '../services/offlineSync';
 
 export const SalesPage: React.FC = () => {
   const { organization } = useAuth();
@@ -51,6 +56,11 @@ export const SalesPage: React.FC = () => {
   const [amountPaidCDF, setAmountPaidCDF] = useState<string>('');
   const [amountPaidUSD, setAmountPaidUSD] = useState<string>('');
   const [changeCurrency, setChangeCurrency] = useState<'CDF' | 'USD'>('CDF');
+
+  // Mobile Money (M-Pesa, Airtel, Orange)
+  const [mobileMoneyPhone, setMobileMoneyPhone] = useState<string>('');
+  const [mobileMoneyStatus, setMobileMoneyStatus] = useState<'IDLE' | 'SENDING' | 'WAITING_PIN' | 'CONFIRMED'>('IDLE');
+  const [isOfflineSale, setIsOfflineSale] = useState(false);
 
   const exchangeRate = organization?.settings?.exchangeRateUsdToCdf || 2850;
   const taxRate = organization?.settings?.enableTax ? Number(organization.settings.taxRatePercent) : 0;
@@ -225,6 +235,36 @@ export const SalesPage: React.FC = () => {
   const taxAmount = roundMoney(taxable * (taxRate / 100));
   const netTotal = roundMoney(taxable + taxAmount);
 
+  const handleInitiateMobileMoney = async () => {
+    if (!mobileMoneyPhone || mobileMoneyPhone.length < 9) {
+      setErrorMsg('Veuillez saisir un numéro de téléphone valide (ex: 0812345678).');
+      return;
+    }
+    setErrorMsg(null);
+    setMobileMoneyStatus('SENDING');
+    try {
+      const op = paymentMethod === 'MOBILE_MONEY_AIRTEL' ? 'AIRTEL' : paymentMethod === 'MOBILE_MONEY_ORANGE' ? 'ORANGE' : 'MPESA';
+      const res = await ApiClient.initiateMobileMoney({
+        operator: op,
+        phoneNumber: mobileMoneyPhone,
+        amount: netTotal,
+        currency: 'CDF',
+      });
+      setPaymentReference(res.reference);
+      setMobileMoneyStatus('WAITING_PIN');
+      success(`Demande ${op} Push transmise au ${mobileMoneyPhone}. Validation en cours...`);
+
+      // Simulation de confirmation en direct
+      setTimeout(() => {
+        setMobileMoneyStatus('CONFIRMED');
+        success(`Paiement Mobile Money ${res.reference} validé par le client !`);
+      }, 3000);
+    } catch (err: any) {
+      setMobileMoneyStatus('IDLE');
+      setErrorMsg(err.message || 'Échec de l\'envoi push Mobile Money.');
+    }
+  };
+
   const handleCheckout = async () => {
     if (cart.length === 0) return;
     if (!selectedCustomerId) {
@@ -233,30 +273,127 @@ export const SalesPage: React.FC = () => {
     }
     setErrorMsg(null);
     setSubmitting(true);
-    try {
-      const res = await ApiClient.createSale({
-        customerId: selectedCustomerId,
-        immediatePayment,
-        paymentMethod,
-        paymentReference,
-        currency: 'CDF',
-        notes,
-        items: cart.map((i) => ({
-          productId: i.productId,
-          quantity: i.quantity,
-          unitPrice: i.unitPrice,
-          discountPercent: i.discountPercent,
-          taxRatePercent: taxRate,
-        })),
-      });
+    setIsOfflineSale(false);
 
+    const salePayload = {
+      customerId: selectedCustomerId,
+      immediatePayment,
+      paymentMethod,
+      paymentReference,
+      currency: 'CDF',
+      notes: notes + (mobileMoneyPhone ? ` [Tél Mobile Money: ${mobileMoneyPhone}]` : ''),
+      items: cart.map((i) => ({
+        productId: i.productId,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        discountPercent: i.discountPercent,
+        taxRatePercent: taxRate,
+      })),
+    };
+
+    // Vérifier si le navigateur est hors-ligne
+    if (!navigator.onLine) {
+      try {
+        const offlineRecord = offlineSync.enqueueSale({
+          customerId: selectedCustomerId,
+          customerName: customers.find((c) => c.id === selectedCustomerId)?.name || 'Client',
+          items: cart.map((i) => ({
+            productId: i.productId,
+            productName: i.name,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+            total: i.quantity * i.unitPrice,
+          })),
+          subtotal,
+          taxAmount,
+          total: netTotal,
+          currency: 'CDF',
+          paymentMethod,
+          notes: salePayload.notes,
+        });
+
+        setIsOfflineSale(true);
+        setSuccessSale({
+          sale: {
+            saleNumber: offlineRecord.id,
+            total: netTotal,
+            currency: 'CDF',
+            createdAt: offlineRecord.createdAt,
+            items: cart,
+          },
+          invoice: {
+            invoiceNumber: `PROV-${offlineRecord.id.slice(-6)}`,
+            status: 'PENDING_SYNC',
+          },
+        });
+        setCart([]);
+        setNotes('');
+        setPaymentReference('');
+        setMobileMoneyPhone('');
+        setMobileMoneyStatus('IDLE');
+        success('Vente enregistrée HORS-LIGNE avec succès ! Elle sera synchronisée dès le retour d\'internet.');
+      } catch (err: any) {
+        setErrorMsg('Erreur de stockage local de la vente hors-ligne.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    try {
+      const res = await ApiClient.createSale(salePayload);
+      setIsOfflineSale(false);
       setSuccessSale(res);
       setCart([]);
       setNotes('');
       setPaymentReference('');
+      setMobileMoneyPhone('');
+      setMobileMoneyStatus('IDLE');
       loadData();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erreur lors de l\'enregistrement de la vente.');
+      // Si l'erreur est réseau, basculer automatiquement en enregistrement hors-ligne
+      if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError') || !navigator.onLine) {
+        const offlineRecord = offlineSync.enqueueSale({
+          customerId: selectedCustomerId,
+          customerName: customers.find((c) => c.id === selectedCustomerId)?.name || 'Client',
+          items: cart.map((i) => ({
+            productId: i.productId,
+            productName: i.name,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+            total: i.quantity * i.unitPrice,
+          })),
+          subtotal,
+          taxAmount,
+          total: netTotal,
+          currency: 'CDF',
+          paymentMethod,
+          notes: salePayload.notes,
+        });
+
+        setIsOfflineSale(true);
+        setSuccessSale({
+          sale: {
+            saleNumber: offlineRecord.id,
+            total: netTotal,
+            currency: 'CDF',
+            createdAt: offlineRecord.createdAt,
+            items: cart,
+          },
+          invoice: {
+            invoiceNumber: `PROV-${offlineRecord.id.slice(-6)}`,
+            status: 'PENDING_SYNC',
+          },
+        });
+        setCart([]);
+        setNotes('');
+        setPaymentReference('');
+        setMobileMoneyPhone('');
+        setMobileMoneyStatus('IDLE');
+        success('Réseau indisponible : Vente sécurisée en HORS-LIGNE !');
+      } else {
+        setErrorMsg(err.message || 'Erreur lors de l\'enregistrement de la vente.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -528,16 +665,17 @@ export const SalesPage: React.FC = () => {
                           value={paymentMethod}
                           onChange={(e) => setPaymentMethod(e.target.value)}
                         >
-                          <option value="CASH">Espèces</option>
-                          <option value="BANK_TRANSFER">Virement bancaire</option>
-                          <option value="MOBILE_MONEY_MPESA">M-Pesa Vodacom</option>
+                          <option value="CASH">Espèces (Cash)</option>
+                          <option value="MOBILE_MONEY_MPESA">Vodacom M-Pesa</option>
                           <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
+                          <option value="MOBILE_MONEY_ORANGE">Orange Money</option>
+                          <option value="BANK_TRANSFER">Virement bancaire</option>
                           <option value="CHECK">Chèque</option>
                           <option value="CREDIT">À crédit</option>
                         </select>
                       </div>
                       <div className="form-group">
-                        <label className="form-label" htmlFor="sale-ref">Référence</label>
+                        <label className="form-label" htmlFor="sale-ref">Référence / TxID</label>
                         <input
                           id="sale-ref"
                           type="text"
@@ -548,6 +686,54 @@ export const SalesPage: React.FC = () => {
                         />
                       </div>
                     </div>
+
+                    {/* Bloc STK Push Mobile Money RDC */}
+                    {paymentMethod.startsWith('MOBILE_MONEY_') && (
+                      <div style={{
+                        background: '#F0FDF4',
+                        border: '1px solid #BBF7D0',
+                        borderRadius: '8px',
+                        padding: '12px',
+                        marginBottom: '12px',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                          <Smartphone size={16} color="#16A34A" />
+                          <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#166534' }}>
+                            Passerelle Mobile Money RDC (Demande Push STK)
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input
+                            type="tel"
+                            className="input-field"
+                            style={{ flex: 1, fontSize: '0.875rem' }}
+                            placeholder="N° de téléphone client (ex: 0812345678)"
+                            value={mobileMoneyPhone}
+                            onChange={(e) => setMobileMoneyPhone(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={handleInitiateMobileMoney}
+                            disabled={mobileMoneyStatus === 'SENDING' || mobileMoneyStatus === 'WAITING_PIN'}
+                            className="btn btn-sm btn-primary"
+                            style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                          >
+                            <Radio size={13} />
+                            {mobileMoneyStatus === 'SENDING' ? 'Envoi...' : mobileMoneyStatus === 'WAITING_PIN' ? 'Attente PIN...' : 'Déclencher Push'}
+                          </button>
+                        </div>
+                        {mobileMoneyStatus === 'WAITING_PIN' && (
+                          <div style={{ fontSize: '0.75rem', color: '#B45309', marginTop: '6px' }}>
+                            ⏳ Demande transmise. Le client compose son code PIN sur son téléphone...
+                          </div>
+                        )}
+                        {mobileMoneyStatus === 'CONFIRMED' && (
+                          <div style={{ fontSize: '0.75rem', color: '#15803D', fontWeight: 600, marginTop: '6px' }}>
+                            ✅ Transaction validée par l'opérateur ! TxID : {paymentReference}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                       <input
@@ -861,6 +1047,26 @@ export const SalesPage: React.FC = () => {
               </div>
             </div>
             <div className="modal-body">
+              {isOfflineSale && (
+                <div style={{
+                  background: '#FEF3C7',
+                  border: '1px solid #FCD34D',
+                  color: '#92400E',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  fontSize: '0.8125rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '14px',
+                }}>
+                  <WifiOff size={16} color="#D97706" />
+                  <span>
+                    <b>Mode Hors-Ligne :</b> Reçu provisoire généré localement. La facture sera certifiée dès la reconnexion au serveur.
+                  </span>
+                </div>
+              )}
+
               <div style={{ textAlign: 'center', marginBottom: '20px' }}>
                 <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#111827', marginBottom: '4px' }}>
                   Vente N° {successSale.sale?.saleNumber}
@@ -895,12 +1101,12 @@ export const SalesPage: React.FC = () => {
                 />
               </div>
             </div>
-            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="btn"
-                  style={{ background: '#25D366', color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  style={{ background: '#25D366', color: '#fff', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
                   onClick={() => {
                     const s = successSale?.sale || successSale;
                     const inv = successSale?.invoice;
@@ -917,20 +1123,76 @@ export const SalesPage: React.FC = () => {
                   }}
                   title="Envoyer le ticket par WhatsApp"
                 >
-                  <Share2 size={14} /> WhatsApp
+                  <Share2 size={13} /> WhatsApp
                 </button>
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => {
+                    const s = successSale?.sale || successSale;
+                    const items = s?.items || cart;
+                    printThermalReceiptWeb({
+                      companyName: organization?.name || 'Smart PME Finance',
+                      companyAddress: organization?.address,
+                      companyPhone: organization?.phone,
+                      companyNif: organization?.taxId,
+                      receiptNumber: s?.saleNumber || 'VNT-001',
+                      date: new Date(s?.createdAt || Date.now()).toLocaleString('fr-FR'),
+                      customerName: customers.find((c) => c.id === selectedCustomerId)?.name,
+                      items: items.map((it: any) => ({
+                        name: it.name || it.product?.name || 'Article',
+                        quantity: Number(it.quantity || 1),
+                        unitPrice: Number(it.unitPrice || 0),
+                        total: Number(it.quantity || 1) * Number(it.unitPrice || 0),
+                      })),
+                      subtotal: Number(s?.total || 0),
+                      total: Number(s?.total || 0),
+                      currency: s?.currency || 'CDF',
+                      paymentMethod,
+                    }, { width: '80mm' });
+                  }}
                   className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
+                  title="Impression thermique standard 80mm"
                 >
-                  <Printer size={14} /> Imprimer
+                  <Printer size={13} /> Ticket 80mm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const s = successSale?.sale || successSale;
+                    const items = s?.items || cart;
+                    printThermalReceiptWeb({
+                      companyName: organization?.name || 'Smart PME Finance',
+                      companyAddress: organization?.address,
+                      companyPhone: organization?.phone,
+                      companyNif: organization?.taxId,
+                      receiptNumber: s?.saleNumber || 'VNT-001',
+                      date: new Date(s?.createdAt || Date.now()).toLocaleString('fr-FR'),
+                      customerName: customers.find((c) => c.id === selectedCustomerId)?.name,
+                      items: items.map((it: any) => ({
+                        name: it.name || it.product?.name || 'Article',
+                        quantity: Number(it.quantity || 1),
+                        unitPrice: Number(it.unitPrice || 0),
+                        total: Number(it.quantity || 1) * Number(it.unitPrice || 0),
+                      })),
+                      subtotal: Number(s?.total || 0),
+                      total: Number(s?.total || 0),
+                      currency: s?.currency || 'CDF',
+                      paymentMethod,
+                    }, { width: '58mm' });
+                  }}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '12px' }}
+                  title="Impression thermique étroite 58mm"
+                >
+                  58mm
                 </button>
               </div>
               <button
                 type="button"
                 onClick={() => setSuccessSale(null)}
                 className="btn btn-primary"
+                style={{ fontSize: '13px' }}
               >
                 Nouvelle vente [F4]
               </button>

@@ -13,6 +13,7 @@ import { FinancesModule } from './modules/finances/finances.module';
 import { AnomaliesModule } from './modules/anomalies/anomalies.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { RemoteControlModule } from './modules/remote-control/remote-control.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { HealthModule } from './modules/health/health.module';
 
 @Module({
@@ -31,6 +32,7 @@ import { HealthModule } from './modules/health/health.module';
     AnomaliesModule,
     DashboardModule,
     RemoteControlModule,
+    NotificationsModule,
     HealthModule,
   ],
 })

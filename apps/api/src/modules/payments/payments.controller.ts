@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
+import { MobileMoneyService } from './mobile-money.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -9,7 +10,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class PaymentsController {
-  constructor(private paymentsService: PaymentsService) {}
+  constructor(
+    private paymentsService: PaymentsService,
+    private mobileMoneyService: MobileMoneyService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Lister les paiements et reçus' })
@@ -30,4 +34,36 @@ export class PaymentsController {
   ) {
     return this.paymentsService.createPayment(orgId, userId, body);
   }
+
+  @Post('mobile-money/initiate')
+  @ApiOperation({ summary: 'Initier un paiement Mobile Money STK Push (M-Pesa, Airtel, Orange)' })
+  async initiateMobileMoney(
+    @CurrentUser('organizationId') orgId: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: any,
+  ) {
+    return this.mobileMoneyService.initiatePush(orgId, userId, body);
+  }
+
+  @Get('mobile-money/status/:ref')
+  @ApiOperation({ summary: 'Vérifier le statut d\'une transaction Mobile Money' })
+  async checkMobileMoneyStatus(@Param('ref') ref: string) {
+    return this.mobileMoneyService.checkStatus(ref);
+  }
+
+  @Post('mobile-money/confirm')
+  @ApiOperation({ summary: 'Confirmer et comptabiliser un paiement Mobile Money validé' })
+  async confirmMobileMoney(
+    @CurrentUser('organizationId') orgId: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: { reference: string; invoiceId?: string },
+  ) {
+    return this.mobileMoneyService.confirmMobileMoneyPayment(
+      orgId,
+      userId,
+      body.reference,
+      body.invoiceId,
+    );
+  }
 }
+
