@@ -334,6 +334,8 @@ def main():
 
     window = SmartPMEDesktop(target_url=target_url, api_url=api_url)
     window.show()
+    window.raise_()
+    window.activateWindow()
 
     sys.exit(app.exec())
 
