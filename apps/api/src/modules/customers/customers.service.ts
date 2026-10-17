@@ -62,4 +62,16 @@ export class CustomersService {
       data,
     });
   }
+
+  async delete(organizationId: string, id: string) {
+    await this.findById(organizationId, id);
+    const invoiceCount = await this.prisma.invoice.count({ where: { customerId: id } });
+    if (invoiceCount > 0) {
+      return this.prisma.customer.update({
+        where: { id },
+        data: { isActive: false },
+      });
+    }
+    return this.prisma.customer.delete({ where: { id } });
+  }
 }

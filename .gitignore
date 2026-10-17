@@ -54,3 +54,11 @@ Thumbs.db
 uploads/
 *.sqlite
 *.sqlite3
+backups/
+
+# Python
+__pycache__/
+*.py[cod]
+dist-py/
+build-py/
+*.spec

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Building2, ShieldCheck, ArrowRight, Lock, Mail } from 'lucide-react';
+import { Building2, AlertCircle, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const [email, setEmail] = useState('admin@smartpme.cd');
-  const [password, setPassword] = useState('Admin@2026!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -13,177 +14,159 @@ export const LoginPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email.trim() || !password) {
+      setError('Veuillez saisir votre identifiant et votre mot de passe.');
+      return;
+    }
     setError(null);
     setLoading(true);
     try {
-      await login(email, password);
+      await login(email.trim(), password);
       navigate('/');
     } catch (err: any) {
-      setError(err.message || 'Échec de connexion');
+      setError(err.message || 'Identifiant ou mot de passe incorrect.');
     } finally {
       setLoading(false);
     }
   };
 
-  const setPresetUser = (presetEmail: string, presetPass: string) => {
-    setEmail(presetEmail);
-    setPassword(presetPass);
-  };
-
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'radial-gradient(ellipse at top, #1e3a8a 0%, #0b1120 70%)',
-      padding: '2rem',
-    }}>
-      <div style={{
-        width: '100%',
-        maxWidth: '460px',
-        background: 'rgba(17, 28, 53, 0.9)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        backdropFilter: 'blur(20px)',
-        borderRadius: '20px',
-        padding: '2.5rem',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 40px rgba(37, 99, 235, 0.2)',
-      }}>
-        {/* Brand header */}
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+    <div className="login-page">
+      <div style={{ width: '100%', maxWidth: '400px' }}>
+        {/* Logo & Titre */}
+        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
           <div style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '16px',
-            background: 'linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%)',
+            width: '52px',
+            height: '52px',
+            background: '#2563EB',
+            borderRadius: '10px',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
-            boxShadow: '0 10px 20px rgba(37, 99, 235, 0.35)',
-            marginBottom: '1rem',
+            marginBottom: '16px',
           }}>
-            <Building2 size={30} />
+            <Building2 size={26} />
           </div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
+          <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
             Smart PME Finance
-          </h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-            Gestion commerciale & financière intégrée • RDC
+          </h1>
+          <p style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
+            Gestion commerciale & financière — RDC
           </p>
         </div>
 
-        {error && (
+        {/* Carte connexion */}
+        <div className="login-card">
+          <div style={{ marginBottom: '20px' }}>
+            <h2 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827', marginBottom: '2px' }}>
+              Connexion
+            </h2>
+            <p style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
+              Saisissez vos identifiants professionnels.
+            </p>
+          </div>
+
+          {error && (
+            <div className="alert alert-danger" style={{ marginBottom: '18px' }}>
+              <AlertCircle size={15} className="alert-icon" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="form-group">
+              <label className="form-label" htmlFor="login-email">
+                Adresse e-mail <span className="required">*</span>
+              </label>
+              <div className="input-with-icon">
+                <Mail size={15} className="input-icon" />
+                <input
+                  id="login-email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  className="input-field"
+                  placeholder="nom@entreprise.cd"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '24px' }}>
+              <label className="form-label" htmlFor="login-password">
+                Mot de passe <span className="required">*</span>
+              </label>
+              <div className="input-with-icon" style={{ position: 'relative' }}>
+                <Lock size={15} className="input-icon" />
+                <input
+                  id="login-password"
+                  type={showPwd ? 'text' : 'password'}
+                  required
+                  autoComplete="current-password"
+                  className="input-field"
+                  style={{ paddingRight: '38px' }}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPwd((v) => !v)}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#9CA3AF',
+                    display: 'flex',
+                    padding: '2px',
+                  }}
+                  tabIndex={-1}
+                  aria-label={showPwd ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                >
+                  {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn btn-primary btn-lg"
+              style={{ width: '100%' }}
+            >
+              {loading ? (
+                <>
+                  <span className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
+                  Connexion en cours...
+                </>
+              ) : 'Se connecter'}
+            </button>
+          </form>
+
           <div style={{
-            background: 'var(--danger-bg)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            color: '#F87171',
-            padding: '0.75rem 1rem',
-            borderRadius: '10px',
-            fontSize: '0.85rem',
-            marginBottom: '1.5rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
+            marginTop: '20px',
+            paddingTop: '16px',
+            borderTop: '1px solid #E2E8F0',
+            fontSize: '0.75rem',
+            color: '#9CA3AF',
+            textAlign: 'center',
+            lineHeight: 1.5,
           }}>
-            <ShieldCheck size={18} />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {/* Form */}
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1.25rem' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
-              Identifiant / Email professionnel
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type="email"
-                required
-                className="input-field"
-                style={{ paddingLeft: '2.5rem' }}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="nom@entreprise.cd"
-              />
-              <Mail size={18} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)' }} />
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '1.75rem' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
-              Mot de passe
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type="password"
-                required
-                className="input-field"
-                style={{ paddingLeft: '2.5rem' }}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-              />
-              <Lock size={18} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)' }} />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn btn-primary"
-            style={{ width: '100%', padding: '0.75rem', fontSize: '0.95rem' }}
-          >
-            {loading ? 'Connexion en cours...' : (
-              <>
-                <span>Se connecter</span>
-                <ArrowRight size={18} />
-              </>
-            )}
-          </button>
-        </form>
-
-        {/* Quick-test Presets */}
-        <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-subtle)' }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', textAlign: 'center', marginBottom: '0.75rem', fontWeight: 600 }}>
-            COMPTES DE DÉMONSTRATION (CLIQUEZ POUR REMPLIR) :
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-            <button
-              type="button"
-              onClick={() => setPresetUser('admin@smartpme.cd', 'Admin@2026!')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem' }}
-            >
-              👑 Administrateur
-            </button>
-            <button
-              type="button"
-              onClick={() => setPresetUser('manager@smartpme.cd', 'Manager@2026!')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem' }}
-            >
-              👔 Gérant
-            </button>
-            <button
-              type="button"
-              onClick={() => setPresetUser('comptable@smartpme.cd', 'Comptable@2026!')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem' }}
-            >
-              📊 Comptable
-            </button>
-            <button
-              type="button"
-              onClick={() => setPresetUser('caissier@smartpme.cd', 'Caissier@2026!')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem' }}
-            >
-              💰 Caissier
-            </button>
+            Pour obtenir vos identifiants, contactez l'administrateur de votre organisation.
           </div>
         </div>
+
+        <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '0.75rem', color: '#9CA3AF' }}>
+          Smart PME Finance v1.0 · Kinshasa, RDC
+        </p>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -41,11 +41,12 @@ const ProtectedLayout: React.FC<{ children: React.ReactNode; title: string; subt
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'var(--bg-main)',
-        color: '#fff',
-        fontSize: '1.1rem',
+        background: '#F3F4F6',
+        flexDirection: 'column',
+        gap: '12px',
       }}>
-        Initialisation de Smart PME Finance...
+        <div className="spinner" />
+        <span style={{ fontSize: '0.875rem', color: '#6B7280' }}>Chargement de Smart PME Finance...</span>
       </div>
     );
   }
@@ -55,11 +56,11 @@ const ProtectedLayout: React.FC<{ children: React.ReactNode; title: string; subt
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-main)' }}>
+    <div className="app-shell">
       <Sidebar anomalyCount={anomalyCount} lowStockCount={lowStockCount} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div className="main-content">
         <Header title={title} subtitle={subtitle} activeSession={activeSession} />
-        <main style={{ flex: 1 }}>{children}</main>
+        <main className="page-body">{children}</main>
       </div>
     </div>
   );
@@ -76,8 +77,8 @@ export const App: React.FC = () => {
             path="/"
             element={
               <ProtectedLayout
-                title="Supervision & Pilotage Financier"
-                subtitle="Vue d’ensemble des opérations commerciales, de trésorerie et alertes d'anomalies"
+                title="Tableau de bord"
+                subtitle="Vue d'ensemble des indicateurs financiers et opérationnels"
               >
                 <DashboardPage />
               </ProtectedLayout>
@@ -88,8 +89,8 @@ export const App: React.FC = () => {
             path="/sales"
             element={
               <ProtectedLayout
-                title="Ventes & Caisse Enregistreuse"
-                subtitle="Enregistrement des ventes au comptoir, facturation directe et décompte des stocks"
+                title="Ventes & Point de vente"
+                subtitle="Enregistrement des ventes, facturation directe et gestion des stocks"
               >
                 <SalesPage />
               </ProtectedLayout>
@@ -100,8 +101,8 @@ export const App: React.FC = () => {
             path="/products"
             element={
               <ProtectedLayout
-                title="Produits, Services & Gestion des Stocks"
-                subtitle="Catalogue des articles, prix d'achat/vente, marges et suivi des seuils d'alerte"
+                title="Produits & Stocks"
+                subtitle="Catalogue, prix d'achat/vente, marges et seuils d'alerte"
               >
                 <ProductsPage />
               </ProtectedLayout>
@@ -112,8 +113,8 @@ export const App: React.FC = () => {
             path="/invoices"
             element={
               <ProtectedLayout
-                title="Facturation Complète & Devis"
-                subtitle="Cycle de vie des factures, règlements partiels et impression des pièces légales"
+                title="Facturation"
+                subtitle="Factures, règlements partiels et impression des pièces"
               >
                 <InvoicesPage />
               </ProtectedLayout>
@@ -124,8 +125,8 @@ export const App: React.FC = () => {
             path="/finances"
             element={
               <ProtectedLayout
-                title="Caisse, Dépenses & Comptes Financiers"
-                subtitle="Clôture de caisse avec calcul d’écart théorique vs réel, dépenses et comptes Rawbank/M-Pesa"
+                title="Caisse & Dépenses"
+                subtitle="Gestion de caisse, dépenses et comptes financiers"
               >
                 <FinancesPage />
               </ProtectedLayout>
@@ -136,8 +137,8 @@ export const App: React.FC = () => {
             path="/customers"
             element={
               <ProtectedLayout
-                title="Répertoire Clients & Suivi des Créances"
-                subtitle="Fiches clients, encours de facturation, limites de crédit et historique"
+                title="Clients"
+                subtitle="Fiches clients, encours, limites de crédit et historique"
               >
                 <CustomersPage />
               </ProtectedLayout>
@@ -148,8 +149,8 @@ export const App: React.FC = () => {
             path="/anomalies"
             element={
               <ProtectedLayout
-                title="Détection Intelligente des Anomalies"
-                subtitle="Moteur d’inspection explicable des anomalies financières, stocks et remises anormales"
+                title="Détection des anomalies"
+                subtitle="Inspection des anomalies financières, stocks et remises"
               >
                 <AnomaliesPage />
               </ProtectedLayout>
@@ -160,8 +161,8 @@ export const App: React.FC = () => {
             path="/settings"
             element={
               <ProtectedLayout
-                title="Paramètres de l’Entreprise"
-                subtitle="Personnalisation de la devise (CDF/USD), fiscalité, mentions légales et seuils de contrôle"
+                title="Paramètres"
+                subtitle="Devise, fiscalité, mentions légales et seuils de contrôle"
               >
                 <SettingsPage />
               </ProtectedLayout>

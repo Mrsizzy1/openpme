@@ -1,42 +1,53 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
-import { formatCurrency, Currency, roundMoney } from '@smart-pme/shared';
-import {
-  Receipt,
-  Search,
-  Plus,
-  Printer,
-  CreditCard,
-  Building2,
-  X,
-  CheckCircle,
-  AlertCircle
-} from 'lucide-react';
+import { formatCurrency } from '@smart-pme/shared';
+import { Receipt, Printer, CreditCard, X, AlertTriangle, RefreshCw, CheckCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+
+const statusLabels: Record<string, string> = {
+  PAID: 'Payée',
+  PARTIALLY_PAID: 'Partielle',
+  ISSUED: 'Émise',
+  OVERDUE: 'En retard',
+  CANCELLED: 'Annulée',
+  DRAFT: 'Brouillon',
+};
+
+const statusClass: Record<string, string> = {
+  PAID: 'badge-success',
+  PARTIALLY_PAID: 'badge-warning',
+  ISSUED: 'badge-info',
+  OVERDUE: 'badge-danger',
+  CANCELLED: 'badge-neutral',
+  DRAFT: 'badge-neutral',
+};
 
 export const InvoicesPage: React.FC = () => {
   const { organization } = useAuth();
+  const { success, error: toastError } = useToast();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Print / View modal
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
 
-  // Payment modal
   const [paymentInvoice, setPaymentInvoice] = useState<any | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
   const [paymentRef, setPaymentRef] = useState<string>('');
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [submittingPayment, setSubmittingPayment] = useState(false);
 
   const loadInvoices = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const res = await ApiClient.getInvoices(statusFilter || undefined);
       setInvoices(res);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setLoadError(err.message || 'Impossible de charger les factures.');
     } finally {
       setLoading(false);
     }
@@ -48,326 +59,404 @@ export const InvoicesPage: React.FC = () => {
 
   const handleOpenPayment = (inv: any) => {
     setPaymentInvoice(inv);
-    setPaymentAmount(inv.balance.toString());
+    setPaymentAmount(String(Number(inv.balance).toFixed(2)));
     setPaymentRef('');
+    setPaymentError(null);
   };
 
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentInvoice) return;
+    setPaymentError(null);
+
+    const amt = parseFloat(paymentAmount);
+    if (!amt || amt <= 0) {
+      setPaymentError('Le montant doit être supérieur à 0.');
+      return;
+    }
+    if (amt > Number(paymentInvoice.balance)) {
+      setPaymentError(`Le montant ne peut pas dépasser le solde restant (${formatCurrency(Number(paymentInvoice.balance), paymentInvoice.currency)}).`);
+      return;
+    }
+
     setSubmittingPayment(true);
     try {
       await ApiClient.createPayment({
         invoiceId: paymentInvoice.id,
         customerId: paymentInvoice.customerId,
-        amount: parseFloat(paymentAmount),
+        amount: amt,
         method: paymentMethod,
-        reference: paymentRef,
+        reference: paymentRef.trim() || undefined,
         currency: paymentInvoice.currency,
       });
       setPaymentInvoice(null);
+      success(`Règlement de ${formatCurrency(amt, paymentInvoice.currency)} enregistré avec succès.`);
       loadInvoices();
     } catch (err: any) {
-      alert(err.message || 'Erreur lors de l’encaissement');
+      setPaymentError(err.message || 'Erreur lors de l\'enregistrement du règlement.');
     } finally {
       setSubmittingPayment(false);
     }
   };
 
+  const filterOptions = [
+    { value: '', label: 'Toutes' },
+    { value: 'ISSUED', label: 'Émises' },
+    { value: 'PARTIALLY_PAID', label: 'Partielles' },
+    { value: 'OVERDUE', label: 'En retard' },
+    { value: 'PAID', label: 'Payées' },
+    { value: 'CANCELLED', label: 'Annulées' },
+  ];
+
   return (
-    <div style={{ padding: '2rem' }}>
-      {/* Filters and Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          {['', 'PAID', 'PARTIALLY_PAID', 'ISSUED', 'OVERDUE'].map((st) => (
-            <button
-              key={st}
-              onClick={() => setStatusFilter(st)}
-              className={`btn ${statusFilter === st ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-            >
-              {st === '' ? 'Toutes les factures' : st === 'PAID' ? 'Soldées (Payées)' : st === 'PARTIALLY_PAID' ? 'Acomptes / Partielle' : st === 'ISSUED' ? 'Émises' : 'En retard'}
+    <div>
+      <div className="table-wrapper">
+        <div className="table-toolbar">
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {filterOptions.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`btn btn-sm ${statusFilter === opt.value ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setStatusFilter(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="table-toolbar-actions">
+            <button type="button" className="btn btn-sm btn-secondary" onClick={loadInvoices}>
+              <RefreshCw size={13} /> Actualiser
             </button>
-          ))}
+          </div>
         </div>
-      </div>
 
-      {/* Invoices Table */}
-      <div className="glass-panel" style={{ padding: '1.5rem' }}>
         <div className="table-container">
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>N° Facture</th>
-                <th>Client</th>
-                <th>Date d’Émission</th>
-                <th>Échéance</th>
-                <th>Montant Total</th>
-                <th>Montant Payé</th>
-                <th>Solde Restant</th>
-                <th>Statut</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((inv) => (
-                <tr key={inv.id}>
-                  <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--primary-light)' }}>
-                    {inv.invoiceNumber}
-                  </td>
-                  <td>
-                    <div style={{ fontWeight: 600, color: '#fff' }}>{inv.customer?.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>{inv.customer?.phone}</div>
-                  </td>
-                  <td>{new Date(inv.issueDate).toLocaleDateString('fr-FR')}</td>
-                  <td>{new Date(inv.dueDate).toLocaleDateString('fr-FR')}</td>
-                  <td style={{ fontWeight: 700, color: '#fff' }}>
-                    {formatCurrency(Number(inv.total), inv.currency)}
-                  </td>
-                  <td style={{ color: '#34D399', fontWeight: 600 }}>
-                    {formatCurrency(Number(inv.paidAmount), inv.currency)}
-                  </td>
-                  <td style={{ fontWeight: 700, color: Number(inv.balance) > 0 ? '#F87171' : 'var(--text-subtle)' }}>
-                    {formatCurrency(Number(inv.balance), inv.currency)}
-                  </td>
-                  <td>
-                    <span className={`badge ${inv.status === 'PAID' ? 'badge-success' : inv.status === 'PARTIALLY_PAID' ? 'badge-warning' : 'badge-info'}`}>
-                      {inv.status === 'PAID' ? 'Payée' : inv.status === 'PARTIALLY_PAID' ? 'Partielle' : 'Émise'}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <button
-                        onClick={() => setSelectedInvoice(inv)}
-                        className="btn btn-secondary btn-sm"
-                        title="Voir et imprimer"
-                        style={{ padding: '0.35rem 0.6rem' }}
-                      >
-                        <Printer size={15} />
-                      </button>
-                      {Number(inv.balance) > 0 && (
-                        <button
-                          onClick={() => handleOpenPayment(inv)}
-                          className="btn btn-primary btn-sm"
-                          style={{ padding: '0.35rem 0.6rem' }}
-                          title="Encaisser"
-                        >
-                          <CreditCard size={15} />
-                          <span>Régler</span>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Invoice Document Modal (Print view) */}
-      {selectedInvoice && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '750px', background: '#fff', color: '#111827', padding: '2.5rem' }}>
-            {/* Header info */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #2563EB', paddingBottom: '1.25rem', marginBottom: '1.5rem' }}>
-              <div>
-                <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#1E3A8A' }}>
-                  {organization?.name}
-                </h2>
-                <div style={{ fontSize: '0.8rem', color: '#4B5563', lineHeight: 1.4 }}>
-                  {organization?.address}<br />
-                  {organization?.city}, {organization?.country}<br />
-                  Tél : {organization?.phone} | Email : {organization?.email}<br />
-                  <strong>NIF :</strong> {organization?.taxId} | <strong>RCCM :</strong> {organization?.rccm} | <strong>ID NAT :</strong> {organization?.idNat}
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#2563EB' }}>
-                  FACTURE COMMERCIALE
-                </div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                  N° {selectedInvoice.invoiceNumber}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#6B7280', marginTop: '0.25rem' }}>
-                  Date : {new Date(selectedInvoice.issueDate).toLocaleDateString('fr-FR')}<br />
-                  Échéance : {new Date(selectedInvoice.dueDate).toLocaleDateString('fr-FR')}
-                </div>
+          {loading ? (
+            <div className="loading-state">
+              <div className="spinner" />
+              <span>Chargement...</span>
+            </div>
+          ) : loadError ? (
+            <div className="table-empty">
+              <div className="table-empty-title" style={{ color: '#DC2626' }}>Erreur de chargement</div>
+              <div className="table-empty-sub">{loadError}</div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={loadInvoices}>
+                <RefreshCw size={12} /> Réessayer
+              </button>
+            </div>
+          ) : invoices.length === 0 ? (
+            <div className="table-empty">
+              <Receipt className="table-empty-icon" />
+              <div className="table-empty-title">Aucune facture trouvée</div>
+              <div className="table-empty-sub">
+                {statusFilter
+                  ? `Aucune facture avec le statut « ${statusLabels[statusFilter] || statusFilter} ».`
+                  : 'Les factures sont générées automatiquement lors des ventes.'}
               </div>
             </div>
-
-            {/* Client address */}
-            <div style={{ background: '#F3F4F6', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase' }}>Facturé à :</div>
-              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#111827' }}>{selectedInvoice.customer?.name}</div>
-              <div style={{ fontSize: '0.85rem', color: '#4B5563' }}>
-                {selectedInvoice.customer?.companyName && <span>{selectedInvoice.customer.companyName}<br /></span>}
-                {selectedInvoice.customer?.address || 'Kinshasa, RDC'}<br />
-                Tél : {selectedInvoice.customer?.phone}
-              </div>
-            </div>
-
-            {/* Items table */}
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
+          ) : (
+            <table className="data-table">
               <thead>
-                <tr style={{ background: '#1E3A8A', color: '#fff' }}>
-                  <th style={{ padding: '0.6rem', textAlign: 'left' }}>Description</th>
-                  <th style={{ padding: '0.6rem', textAlign: 'center' }}>Qté</th>
-                  <th style={{ padding: '0.6rem', textAlign: 'right' }}>P.U.</th>
-                  <th style={{ padding: '0.6rem', textAlign: 'right' }}>TVA %</th>
-                  <th style={{ padding: '0.6rem', textAlign: 'right' }}>Total</th>
+                <tr>
+                  <th>N° Facture</th>
+                  <th>Client</th>
+                  <th>Émission</th>
+                  <th>Échéance</th>
+                  <th className="col-amount">Total TTC</th>
+                  <th className="col-amount">Réglé</th>
+                  <th className="col-amount">Solde dû</th>
+                  <th>Statut</th>
+                  <th className="col-actions">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {selectedInvoice.items?.map((item: any, i: number) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #E5E7EB' }}>
-                    <td style={{ padding: '0.6rem' }}>{item.product?.name || item.description}</td>
-                    <td style={{ padding: '0.6rem', textAlign: 'center' }}>{item.quantity}</td>
-                    <td style={{ padding: '0.6rem', textAlign: 'right' }}>{formatCurrency(Number(item.unitPrice), selectedInvoice.currency)}</td>
-                    <td style={{ padding: '0.6rem', textAlign: 'right' }}>{item.taxRatePercent}%</td>
-                    <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 700 }}>{formatCurrency(Number(item.total), selectedInvoice.currency)}</td>
-                  </tr>
-                ))}
+                {invoices.map((inv: any) => {
+                  const balance = Number(inv.balance);
+                  const isOverdue = inv.status === 'OVERDUE' || (balance > 0 && new Date(inv.dueDate) < new Date());
+                  return (
+                    <tr key={inv.id}>
+                      <td className="col-mono">{inv.invoiceNumber}</td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{inv.customer?.name}</div>
+                        {inv.customer?.phone && (
+                          <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>{inv.customer.phone}</div>
+                        )}
+                      </td>
+                      <td style={{ fontSize: '0.8125rem' }}>{new Date(inv.issueDate).toLocaleDateString('fr-FR')}</td>
+                      <td style={{ fontSize: '0.8125rem', color: isOverdue && balance > 0 ? '#DC2626' : undefined }}>
+                        {new Date(inv.dueDate).toLocaleDateString('fr-FR')}
+                      </td>
+                      <td className="col-amount font-semibold">{formatCurrency(Number(inv.total), inv.currency)}</td>
+                      <td className="col-amount text-success">{formatCurrency(Number(inv.paidAmount), inv.currency)}</td>
+                      <td className="col-amount" style={{ color: balance > 0 ? '#DC2626' : '#16A34A', fontWeight: 700 }}>
+                        {formatCurrency(balance, inv.currency)}
+                      </td>
+                      <td>
+                        <span className={`badge ${statusClass[inv.status] || 'badge-neutral'}`}>
+                          {statusLabels[inv.status] || inv.status}
+                        </span>
+                      </td>
+                      <td className="col-actions">
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedInvoice(inv)}
+                            className="btn btn-sm btn-secondary"
+                            title="Voir et imprimer"
+                          >
+                            <Printer size={13} /> Voir
+                          </button>
+                          {balance > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPayment(inv)}
+                              className="btn btn-sm btn-primary"
+                              title="Enregistrer un règlement"
+                            >
+                              <CreditCard size={13} /> Régler
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          )}
+        </div>
+      </div>
 
-            {/* Totals */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.5rem' }}>
-              <div style={{ width: '280px', fontSize: '0.85rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
-                  <span>Sous-total HT :</span>
-                  <span>{formatCurrency(Number(selectedInvoice.subtotal), selectedInvoice.currency)}</span>
-                </div>
-                {Number(selectedInvoice.taxAmount) > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}>
-                    <span>TVA (16%) :</span>
-                    <span>{formatCurrency(Number(selectedInvoice.taxAmount), selectedInvoice.currency)}</span>
+      {/* Modal aperçu / impression facture */}
+      {selectedInvoice && (
+        <div className="modal-overlay">
+          <div className="modal modal-lg" style={{ background: '#fff', color: '#111827' }}>
+            <div className="modal-header" style={{ background: '#fff', borderColor: '#E5E7EB' }}>
+              <span className="modal-title" style={{ color: '#111827' }}>
+                Facture N° {selectedInvoice.invoiceNumber}
+              </span>
+              <button type="button" className="btn-close" onClick={() => setSelectedInvoice(null)} aria-label="Fermer">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ background: '#fff' }}>
+              {/* En-tête facture */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #2563EB', paddingBottom: '16px', marginBottom: '20px' }}>
+                <div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E3A8A', marginBottom: '6px' }}>
+                    {organization?.name}
                   </div>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', fontWeight: 800, fontSize: '1.1rem', borderTop: '2px solid #1E3A8A', color: '#1E3A8A' }}>
-                  <span>Total TTC :</span>
-                  <span>{formatCurrency(Number(selectedInvoice.total), selectedInvoice.currency)}</span>
+                  <div style={{ fontSize: '0.8125rem', color: '#4B5563', lineHeight: 1.6 }}>
+                    {organization?.address}<br />
+                    {organization?.city}, {organization?.country}<br />
+                    Tél : {organization?.phone}<br />
+                    <strong>NIF :</strong> {organization?.taxId}&ensp;|&ensp;
+                    <strong>RCCM :</strong> {organization?.rccm}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0', color: '#059669', fontWeight: 600 }}>
-                  <span>Montant Réglé :</span>
-                  <span>{formatCurrency(Number(selectedInvoice.paidAmount), selectedInvoice.currency)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0', color: '#DC2626', fontWeight: 700 }}>
-                  <span>Solde Restant Dû :</span>
-                  <span>{formatCurrency(Number(selectedInvoice.balance), selectedInvoice.currency)}</span>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '1.125rem', fontWeight: 800, color: '#2563EB', marginBottom: '4px' }}>
+                    FACTURE COMMERCIALE
+                  </div>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: '1rem' }}>
+                    N° {selectedInvoice.invoiceNumber}
+                  </div>
+                  <div style={{ fontSize: '0.8125rem', color: '#6B7280', marginTop: '4px' }}>
+                    Émission : {new Date(selectedInvoice.issueDate).toLocaleDateString('fr-FR')}<br />
+                    Échéance : {new Date(selectedInvoice.dueDate).toLocaleDateString('fr-FR')}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Legal Footer */}
-            <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: '1rem', fontSize: '0.75rem', color: '#6B7280', textAlign: 'center', lineHeight: 1.4 }}>
-              {organization?.settings?.invoiceFooterNote || 'Facture certifiée conforme aux exigences fiscales en République démocratique du Congo.'}<br />
-              Coordonnées bancaires : {organization?.settings?.bankDetails || 'Rawbank Kinshasa'}
-            </div>
+              {/* Client */}
+              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '12px 16px', marginBottom: '20px' }}>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', marginBottom: '4px' }}>Facturé à :</div>
+                <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: '#111827' }}>{selectedInvoice.customer?.name}</div>
+                {selectedInvoice.customer?.companyName && (
+                  <div style={{ fontSize: '0.8125rem', color: '#4B5563' }}>{selectedInvoice.customer.companyName}</div>
+                )}
+                <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
+                  {selectedInvoice.customer?.address || 'Kinshasa, RDC'}<br />
+                  Tél : {selectedInvoice.customer?.phone || '—'}
+                </div>
+              </div>
 
-            {/* Print action buttons */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem', borderTop: '1px solid #E5E7EB', paddingTop: '1rem' }}>
-              <button
-                type="button"
-                onClick={() => setSelectedInvoice(null)}
-                className="btn btn-secondary"
-                style={{ color: '#111827' }}
-              >
+              {/* Articles */}
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px', fontSize: '0.8125rem' }}>
+                <thead>
+                  <tr style={{ background: '#1E3A8A', color: '#fff' }}>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>Désignation</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600 }}>Qté</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>P.U. HT</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>TVA</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedInvoice.items?.map((item: any, i: number) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #E5E7EB' }}>
+                      <td style={{ padding: '7px 12px' }}>{item.product?.name || item.description}</td>
+                      <td style={{ padding: '7px 12px', textAlign: 'center' }}>{item.quantity}</td>
+                      <td style={{ padding: '7px 12px', textAlign: 'right' }}>{formatCurrency(Number(item.unitPrice), selectedInvoice.currency)}</td>
+                      <td style={{ padding: '7px 12px', textAlign: 'right' }}>{item.taxRatePercent}%</td>
+                      <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 700 }}>{formatCurrency(Number(item.total), selectedInvoice.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Totaux */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+                <div style={{ width: '280px', fontSize: '0.8125rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#6B7280' }}>
+                    <span>Sous-total HT</span>
+                    <span>{formatCurrency(Number(selectedInvoice.subtotal), selectedInvoice.currency)}</span>
+                  </div>
+                  {Number(selectedInvoice.taxAmount) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#6B7280' }}>
+                      <span>TVA</span>
+                      <span>{formatCurrency(Number(selectedInvoice.taxAmount), selectedInvoice.currency)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontWeight: 800, fontSize: '1rem', borderTop: '2px solid #1E3A8A', color: '#1E3A8A', marginTop: '4px' }}>
+                    <span>Total TTC</span>
+                    <span>{formatCurrency(Number(selectedInvoice.total), selectedInvoice.currency)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#16A34A', fontWeight: 600 }}>
+                    <span>Montant réglé</span>
+                    <span>{formatCurrency(Number(selectedInvoice.paidAmount), selectedInvoice.currency)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#DC2626', fontWeight: 700 }}>
+                    <span>Solde restant dû</span>
+                    <span>{formatCurrency(Number(selectedInvoice.balance), selectedInvoice.currency)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pied légal */}
+              <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: '12px', fontSize: '0.75rem', color: '#6B7280', textAlign: 'center', lineHeight: 1.5 }}>
+                {organization?.settings?.invoiceFooterNote || 'Facture certifiée conforme aux exigences fiscales — République Démocratique du Congo'}<br />
+                {organization?.settings?.bankDetails && `Coordonnées bancaires : ${organization.settings.bankDetails}`}
+              </div>
+            </div>
+            <div className="modal-footer" style={{ background: '#F8FAFC', borderColor: '#E2E8F0' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setSelectedInvoice(null)}>
                 Fermer
               </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="btn btn-primary"
-              >
-                <Printer size={16} />
-                <span>Imprimer la Facture</span>
+              <button type="button" className="btn btn-primary" onClick={() => window.print()}>
+                <Printer size={14} /> Imprimer
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Record Payment Modal */}
+      {/* Modal règlement */}
       {paymentInvoice && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ padding: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>
-                Enregistrer un Règlement
-              </h3>
-              <button onClick={() => setPaymentInvoice(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-subtle)', cursor: 'pointer' }}>
-                <X size={20} />
+          <div className="modal">
+            <div className="modal-header">
+              <span className="modal-title">Enregistrer un règlement</span>
+              <button type="button" className="btn-close" onClick={() => setPaymentInvoice(null)} aria-label="Fermer">
+                <X size={18} />
               </button>
             </div>
 
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
-              <div>Facture N° : <strong>{paymentInvoice.invoiceNumber}</strong></div>
-              <div>Client : <strong>{paymentInvoice.customer?.name}</strong></div>
-              <div style={{ marginTop: '0.4rem', color: '#F87171', fontWeight: 700 }}>
-                Solde restant à payer : {formatCurrency(Number(paymentInvoice.balance), paymentInvoice.currency)}
-              </div>
-            </div>
-
             <form onSubmit={handleRecordPayment}>
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Montant du règlement ({paymentInvoice.currency}) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  max={paymentInvoice.balance}
-                  className="input-field"
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                />
+              <div className="modal-body">
+                <div style={{
+                  background: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: '6px',
+                  padding: '12px 14px',
+                  marginBottom: '16px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '0.8125rem', color: '#6B7280' }}>Facture N°</span>
+                    <span className="col-mono" style={{ fontSize: '0.8125rem' }}>{paymentInvoice.invoiceNumber}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '0.8125rem', color: '#6B7280' }}>Client</span>
+                    <span style={{ fontWeight: 600, fontSize: '0.8125rem' }}>{paymentInvoice.customer?.name}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '0.8125rem', color: '#6B7280' }}>Solde restant</span>
+                    <span style={{ fontWeight: 700, color: '#DC2626', fontSize: '0.9rem' }}>
+                      {formatCurrency(Number(paymentInvoice.balance), paymentInvoice.currency)}
+                    </span>
+                  </div>
+                </div>
+
+                {paymentError && (
+                  <div className="alert alert-danger" style={{ marginBottom: '14px' }}>
+                    <AlertTriangle size={14} className="alert-icon" />
+                    <span>{paymentError}</span>
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="pay-amount">
+                    Montant du règlement ({paymentInvoice.currency}) <span className="required">*</span>
+                  </label>
+                  <input
+                    id="pay-amount"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max={Number(paymentInvoice.balance)}
+                    required
+                    className="input-field"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="pay-method">Mode de paiement <span className="required">*</span></label>
+                  <select
+                    id="pay-method"
+                    className="input-field"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                  >
+                    <option value="CASH">Espèces</option>
+                    <option value="BANK_TRANSFER">Virement bancaire</option>
+                    <option value="MOBILE_MONEY_MPESA">M-Pesa Vodacom</option>
+                    <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
+                    <option value="CHECK">Chèque</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="pay-ref">Référence / N° bordereau</label>
+                  <input
+                    id="pay-ref"
+                    type="text"
+                    className="input-field"
+                    placeholder="ex : VIR-RAWBANK-12093"
+                    value={paymentRef}
+                    onChange={(e) => setPaymentRef(e.target.value)}
+                  />
+                </div>
               </div>
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Moyen de paiement *
-                </label>
-                <select
-                  className="input-field"
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                >
-                  <option value="CASH">Espèces (Caisse)</option>
-                  <option value="BANK_TRANSFER">Virement Bancaire (Rawbank / EquityBCDC)</option>
-                  <option value="MOBILE_MONEY_MPESA">M-Pesa Marchand</option>
-                  <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
-                  <option value="CHECK">Chèque</option>
-                </select>
-              </div>
-
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Référence du paiement / N° bordereau
-                </label>
-                <input
-                  type="text"
-                  placeholder="ex: VIR-RAWBANK-12093"
-                  className="input-field"
-                  value={paymentRef}
-                  onChange={(e) => setPaymentRef(e.target.value)}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setPaymentInvoice(null)}
-                  className="btn btn-secondary"
-                >
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setPaymentInvoice(null)}>
                   Annuler
                 </button>
-                <button
-                  type="submit"
-                  disabled={submittingPayment}
-                  className="btn btn-primary"
-                >
-                  {submittingPayment ? 'Enregistrement...' : 'Valider le Règlement'}
+                <button type="submit" disabled={submittingPayment} className="btn btn-primary">
+                  {submittingPayment ? (
+                    <>
+                      <span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
+                      Enregistrement...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={14} />
+                      Valider le règlement
+                    </>
+                  )}
                 </button>
               </div>
             </form>

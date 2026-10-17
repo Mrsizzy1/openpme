@@ -3,26 +3,51 @@ import { ApiClient } from '../api/client';
 import {
   ShieldAlert,
   AlertTriangle,
-  CheckCircle2,
+  CheckCircle,
   RefreshCw,
-  Search,
-  Filter,
   Check,
   X,
-  FileText,
-  Clock
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+
+const statusLabels: Record<string, string> = {
+  DETECTED: 'Détectée',
+  UNDER_REVIEW: 'En examen',
+  RESOLVED: 'Résolue',
+  DISMISSED: 'Classée',
+};
+
+const statusClass: Record<string, string> = {
+  DETECTED: 'badge-danger',
+  UNDER_REVIEW: 'badge-warning',
+  RESOLVED: 'badge-success',
+  DISMISSED: 'badge-neutral',
+};
+
+const severityClass: Record<string, string> = {
+  CRITICAL: 'badge-danger',
+  HIGH: 'badge-danger',
+  MEDIUM: 'badge-warning',
+  LOW: 'badge-neutral',
+};
+
+const borderColor: Record<string, string> = {
+  CRITICAL: '#DC2626',
+  HIGH: '#DC2626',
+  MEDIUM: '#D97706',
+  LOW: '#94A3B8',
+};
 
 export const AnomaliesPage: React.FC = () => {
-  const { organization } = useAuth();
+  const { success, error: toastError } = useToast();
   const [anomalies, setAnomalies] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
-  const [severityFilter, setSeverityFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
 
-  // Resolution modal
+  // Modal résolution
   const [selectedAnomaly, setSelectedAnomaly] = useState<any | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [submittingResolve, setSubmittingResolve] = useState(false);
@@ -30,13 +55,11 @@ export const AnomaliesPage: React.FC = () => {
   const loadAnomalies = async () => {
     try {
       setLoading(true);
-      const res = await ApiClient.getAnomalies(
-        statusFilter || undefined,
-        severityFilter || undefined
-      );
+      setLoadError(null);
+      const res = await ApiClient.getAnomalies(statusFilter || undefined);
       setAnomalies(res);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setLoadError(err.message || 'Impossible de charger les anomalies.');
     } finally {
       setLoading(false);
     }
@@ -44,16 +67,19 @@ export const AnomaliesPage: React.FC = () => {
 
   useEffect(() => {
     loadAnomalies();
-  }, [statusFilter, severityFilter]);
+  }, [statusFilter]);
 
   const handleScan = async () => {
     setScanning(true);
+    setScanResult(null);
     try {
       const res = await ApiClient.scanAnomalies();
-      alert(`Scan terminé avec succès : ${res.newAlertsCount} nouvelle(s) anomalie(s) identifiée(s).`);
+      const msg = `Scan terminé : ${res.newAlertsCount} nouvelle(s) anomalie(s) identifiée(s).`;
+      setScanResult(msg);
+      success(msg);
       loadAnomalies();
     } catch (err: any) {
-      alert(err.message || 'Erreur lors de l’inspection');
+      toastError(err.message || 'Erreur lors de l\'inspection des règles.');
     } finally {
       setScanning(false);
     }
@@ -61,27 +87,29 @@ export const AnomaliesPage: React.FC = () => {
 
   const handleResolve = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAnomaly) return;
+    if (!selectedAnomaly || !resolutionNote.trim()) return;
     setSubmittingResolve(true);
     try {
-      await ApiClient.resolveAnomaly(selectedAnomaly.id, resolutionNote);
+      await ApiClient.resolveAnomaly(selectedAnomaly.id, resolutionNote.trim());
       setSelectedAnomaly(null);
       setResolutionNote('');
+      success('Anomalie régularisée et enregistrée.');
       loadAnomalies();
     } catch (err: any) {
-      alert(err.message || 'Erreur lors de la résolution');
+      toastError(err.message || 'Erreur lors de la résolution.');
     } finally {
       setSubmittingResolve(false);
     }
   };
 
   const handleDismiss = async (id: string) => {
-    if (!confirm('Voulez-vous classer sans suite cette alerte ?')) return;
+    if (!window.confirm('Classer cette alerte sans suite ? Elle sera marquée comme non pertinente.')) return;
     try {
       await ApiClient.dismissAnomaly(id);
+      success('Alerte classée sans suite.');
       loadAnomalies();
     } catch (err: any) {
-      console.error(err);
+      toastError(err.message || 'Erreur lors du classement.');
     }
   };
 
@@ -89,213 +117,283 @@ export const AnomaliesPage: React.FC = () => {
   const highCount = anomalies.filter((a) => a.severity === 'HIGH' && a.status === 'DETECTED').length;
   const totalActive = anomalies.filter((a) => a.status === 'DETECTED' || a.status === 'UNDER_REVIEW').length;
 
+  const filterOptions = [
+    { value: '', label: 'Toutes' },
+    { value: 'DETECTED', label: 'Détectées' },
+    { value: 'UNDER_REVIEW', label: 'En examen' },
+    { value: 'RESOLVED', label: 'Résolues' },
+    { value: 'DISMISSED', label: 'Classées' },
+  ];
+
   return (
-    <div style={{ padding: '2rem' }}>
-      {/* Overview Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
-        <div className="glass-panel" style={{ padding: '1.25rem', borderLeft: '4px solid #EF4444' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>ANOMALIES CRITIQUES</div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#EF4444', margin: '0.35rem 0' }}>{criticalCount}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>Nécessitent une action immédiate</div>
+    <div>
+      {/* KPIs */}
+      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '20px' }}>
+        <div className="kpi-card" style={{ borderTop: '3px solid #DC2626' }}>
+          <div className="kpi-label">Critiques</div>
+          <div className="kpi-value" style={{ color: criticalCount > 0 ? '#DC2626' : '#111827' }}>{criticalCount}</div>
+          <div className="kpi-sub">Action immédiate requise</div>
         </div>
-        <div className="glass-panel" style={{ padding: '1.25rem', borderLeft: '4px solid #F59E0B' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>ANOMALIES ÉLEVÉES</div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#F59E0B', margin: '0.35rem 0' }}>{highCount}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>Écarts de caisse & remises</div>
+        <div className="kpi-card" style={{ borderTop: '3px solid #D97706' }}>
+          <div className="kpi-label">Élevées</div>
+          <div className="kpi-value" style={{ color: highCount > 0 ? '#D97706' : '#111827' }}>{highCount}</div>
+          <div className="kpi-sub">Écarts & remises anormales</div>
         </div>
-        <div className="glass-panel" style={{ padding: '1.25rem', borderLeft: '4px solid var(--primary-light)' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>TOTAL ALERTES ACTIVES</div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#fff', margin: '0.35rem 0' }}>{totalActive}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>À examiner par la direction</div>
+        <div className="kpi-card" style={{ borderTop: '3px solid #2563EB' }}>
+          <div className="kpi-label">Total actives</div>
+          <div className="kpi-value">{totalActive}</div>
+          <div className="kpi-sub">À examiner</div>
         </div>
-        <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div className="kpi-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'stretch' }}>
           <button
+            type="button"
             onClick={handleScan}
             disabled={scanning}
             className="btn btn-primary"
-            style={{ width: '100%', padding: '0.75rem' }}
+            style={{ width: '100%' }}
           >
-            <RefreshCw size={18} className={scanning ? 'animate-spin' : ''} />
-            <span>{scanning ? 'Inspection en direct...' : 'Lancer le Scan des Règles'}</span>
+            {scanning ? (
+              <>
+                <span className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
+                Analyse en cours...
+              </>
+            ) : (
+              <>
+                <RefreshCw size={14} />
+                Lancer le scan des règles
+              </>
+            )}
           </button>
+          {scanResult && (
+            <div style={{ fontSize: '0.6875rem', color: '#16A34A', marginTop: '6px', textAlign: 'center' }}>{scanResult}</div>
+          )}
         </div>
       </div>
 
-      {/* Filter bar */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        {['', 'DETECTED', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED'].map((st) => (
+      {/* Filtres par statut */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        {filterOptions.map((opt) => (
           <button
-            key={st}
-            onClick={() => setStatusFilter(st)}
-            className={`btn ${statusFilter === st ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+            key={opt.value}
+            type="button"
+            className={`btn btn-sm ${statusFilter === opt.value ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setStatusFilter(opt.value)}
           >
-            {st === '' ? 'Toutes' : st === 'DETECTED' ? 'Détectées (En cours)' : st === 'UNDER_REVIEW' ? 'En examen' : st === 'RESOLVED' ? 'Résolues' : 'Rejetées'}
+            {opt.label}
           </button>
         ))}
+        <button type="button" className="btn btn-sm btn-secondary" onClick={loadAnomalies} style={{ marginLeft: 'auto' }}>
+          <RefreshCw size={12} /> Actualiser
+        </button>
       </div>
 
-      {/* Anomalies List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {anomalies.length === 0 ? (
-          <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-subtle)' }}>
-            <CheckCircle2 size={40} color="#10B981" style={{ margin: '0 auto 0.75rem' }} />
-            <h4 style={{ color: '#fff', fontSize: '1.1rem', marginBottom: '0.35rem' }}>Aucune anomalie détectée</h4>
-            <p style={{ fontSize: '0.85rem' }}>Toutes les opérations commerciales et financières sont conformes aux règles et seuils d'alerte.</p>
+      {/* Liste anomalies */}
+      {loading ? (
+        <div className="loading-state">
+          <div className="spinner" />
+          <span>Chargement...</span>
+        </div>
+      ) : loadError ? (
+        <div className="alert alert-danger">
+          <AlertTriangle size={15} className="alert-icon" />
+          <div>
+            <div className="alert-title">Erreur de chargement</div>
+            <div className="alert-body">{loadError}</div>
+            <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: '8px' }} onClick={loadAnomalies}>
+              <RefreshCw size={12} /> Réessayer
+            </button>
           </div>
-        ) : (
-          anomalies.map((a) => {
-            const isResolved = a.status === 'RESOLVED';
-            const isCritical = a.severity === 'CRITICAL' || a.severity === 'HIGH';
+        </div>
+      ) : anomalies.length === 0 ? (
+        <div className="card">
+          <div className="table-empty" style={{ padding: '60px 24px' }}>
+            <CheckCircle className="table-empty-icon" style={{ color: '#16A34A' }} />
+            <div className="table-empty-title">Aucune anomalie trouvée</div>
+            <div className="table-empty-sub">
+              {statusFilter
+                ? `Aucune anomalie avec le statut « ${statusLabels[statusFilter] || statusFilter} ».`
+                : 'Toutes les opérations sont conformes aux règles configurées.'}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {anomalies.map((a) => {
+            const isResolved = a.status === 'RESOLVED' || a.status === 'DISMISSED';
+            const bc = isResolved ? '#16A34A' : borderColor[a.severity] || '#94A3B8';
 
             return (
               <div
                 key={a.id}
-                className="glass-panel"
-                style={{
-                  padding: '1.5rem',
-                  borderLeft: `4px solid ${isResolved ? '#10B981' : isCritical ? '#EF4444' : '#F59E0B'}`,
-                }}
+                className="card"
+                style={{ borderLeft: `4px solid ${bc}` }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.65rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                    <div style={{
-                      padding: '6px',
-                      borderRadius: '8px',
-                      background: isResolved ? 'rgba(16, 185, 129, 0.2)' : isCritical ? 'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                      color: isResolved ? '#10B981' : isCritical ? '#EF4444' : '#F59E0B',
-                    }}>
-                      <ShieldAlert size={20} />
-                    </div>
-                    <div>
-                      <h4 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff' }}>
-                        {a.title}
-                      </h4>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>
-                        Règle : <strong style={{ color: 'var(--accent-cyan)' }}>{a.ruleType}</strong> • Détectée le {new Date(a.createdAt).toLocaleString('fr-FR')}
+                <div className="card-body">
+                  {/* En-tête */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <ShieldAlert size={18} color={bc} style={{ flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: '#111827' }}>{a.title}</div>
+                        <div style={{ fontSize: '0.75rem', color: '#6B7280', marginTop: '1px' }}>
+                          Règle : <strong>{a.ruleType}</strong> &nbsp;·&nbsp; {new Date(a.createdAt).toLocaleString('fr-FR')}
+                        </div>
                       </div>
                     </div>
+                    <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                      <span className={`badge ${severityClass[a.severity] || 'badge-neutral'}`}>{a.severity}</span>
+                      <span className={`badge ${statusClass[a.status] || 'badge-neutral'}`}>{statusLabels[a.status] || a.status}</span>
+                    </div>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <span className={`badge badge-${isCritical ? 'danger' : 'warning'}`}>
-                      {a.severity}
-                    </span>
-                    <span className={`badge ${isResolved ? 'badge-success' : 'badge-info'}`}>
-                      {a.status}
-                    </span>
-                  </div>
-                </div>
+                  {/* Explication */}
+                  <p style={{ fontSize: '0.8125rem', color: '#374151', lineHeight: 1.55, marginBottom: '12px' }}>
+                    {a.explanation}
+                  </p>
 
-                <p style={{ fontSize: '0.875rem', color: 'var(--text-main)', lineHeight: 1.5, marginBottom: '1rem' }}>
-                  {a.explanation}
-                </p>
-
-                {/* Values observed vs threshold */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                  gap: '1rem',
-                  background: 'rgba(0,0,0,0.3)',
-                  padding: '0.85rem 1rem',
-                  borderRadius: '8px',
-                  marginBottom: '1rem',
-                  fontSize: '0.8rem',
-                }}>
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Valeur Observée : </span>
-                    <strong style={{ color: '#F87171' }}>{a.observedValue || 'N/A'}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Seuil / Règle Attendue : </span>
-                    <strong style={{ color: '#34D399' }}>{a.expectedThreshold || 'N/A'}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Entité Ciblée : </span>
-                    <strong style={{ color: '#fff' }}>{a.entityType} ({a.entityId})</strong>
-                  </div>
-                </div>
-
-                {/* Resolution note if resolved */}
-                {isResolved && a.resolutionNote && (
+                  {/* Valeurs observées */}
                   <div style={{
-                    background: 'rgba(16, 185, 129, 0.1)',
-                    border: '1px solid rgba(16, 185, 129, 0.3)',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '8px',
-                    fontSize: '0.8rem',
-                    color: '#A7F3D0',
-                    marginBottom: '1rem',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: '8px',
+                    background: '#F8FAFC',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: '6px',
+                    padding: '10px 14px',
+                    marginBottom: '12px',
+                    fontSize: '0.8125rem',
                   }}>
-                    <strong>Résolution ({a.resolvedAt ? new Date(a.resolvedAt).toLocaleDateString('fr-FR') : 'Validé'}) :</strong> {a.resolutionNote}
+                    <div>
+                      <span style={{ color: '#6B7280' }}>Valeur observée : </span>
+                      <strong style={{ color: '#DC2626' }}>{a.observedValue || '—'}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#6B7280' }}>Seuil attendu : </span>
+                      <strong style={{ color: '#16A34A' }}>{a.expectedThreshold || '—'}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#6B7280' }}>Entité : </span>
+                      <strong style={{ color: '#111827' }}>{a.entityType}</strong>
+                    </div>
                   </div>
-                )}
 
-                {/* Action buttons */}
-                {!isResolved && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                    <button
-                      onClick={() => handleDismiss(a.id)}
-                      className="btn btn-secondary btn-sm"
-                    >
-                      Classer sans suite
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSelectedAnomaly(a);
-                        setResolutionNote('');
-                      }}
-                      className="btn btn-primary btn-sm"
-                    >
-                      <Check size={16} />
-                      <span>Examiner & Régulariser</span>
-                    </button>
-                  </div>
-                )}
+                  {/* Note de résolution */}
+                  {isResolved && a.resolutionNote && (
+                    <div className="alert alert-success" style={{ marginBottom: '12px' }}>
+                      <CheckCircle size={14} className="alert-icon" />
+                      <div>
+                        <strong>Résolution</strong>
+                        {a.resolvedAt && ` (${new Date(a.resolvedAt).toLocaleDateString('fr-FR')})`} :&nbsp;
+                        {a.resolutionNote}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  {!isResolved && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleDismiss(a.id)}
+                      >
+                        Classer sans suite
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => {
+                          setSelectedAnomaly(a);
+                          setResolutionNote('');
+                        }}
+                      >
+                        <Check size={13} />
+                        Examiner & Régulariser
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
 
-      {/* Resolution Modal */}
+      {/* Modal résolution */}
       {selectedAnomaly && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ padding: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>
-                Régularisation de l'Anomalie
-              </h3>
-              <button onClick={() => setSelectedAnomaly(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-subtle)', cursor: 'pointer' }}>
-                <X size={20} />
+          <div className="modal">
+            <div className="modal-header">
+              <span className="modal-title">Régularisation de l'anomalie</span>
+              <button
+                type="button"
+                className="btn-close"
+                onClick={() => setSelectedAnomaly(null)}
+                aria-label="Fermer"
+              >
+                <X size={18} />
               </button>
             </div>
 
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
-              <div style={{ fontWeight: 700, color: '#fff', marginBottom: '0.25rem' }}>{selectedAnomaly.title}</div>
-              <p style={{ color: 'var(--text-muted)' }}>{selectedAnomaly.explanation}</p>
-            </div>
-
             <form onSubmit={handleResolve}>
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Commentaire d'audit & Mesure corrective appliquée *
-                </label>
-                <textarea
-                  required
-                  rows={4}
-                  className="input-field"
-                  placeholder="Ex : Réapprovisionnement validé avec le fournisseur DIC, ou accord exceptionnel de remise signé par le directeur..."
-                  value={resolutionNote}
-                  onChange={(e) => setResolutionNote(e.target.value)}
-                />
+              <div className="modal-body">
+                <div style={{
+                  background: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: '6px',
+                  padding: '12px 14px',
+                  marginBottom: '16px',
+                }}>
+                  <div style={{ fontWeight: 600, color: '#111827', marginBottom: '4px', fontSize: '0.875rem' }}>
+                    {selectedAnomaly.title}
+                  </div>
+                  <p style={{ fontSize: '0.8125rem', color: '#6B7280', margin: 0 }}>
+                    {selectedAnomaly.explanation}
+                  </p>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="resolution-note">
+                    Commentaire d'audit & mesure corrective <span className="required">*</span>
+                  </label>
+                  <textarea
+                    id="resolution-note"
+                    required
+                    rows={4}
+                    className="input-field"
+                    placeholder="Décrivez la cause identifiée et la mesure corrective appliquée..."
+                    value={resolutionNote}
+                    onChange={(e) => setResolutionNote(e.target.value)}
+                    style={{ resize: 'vertical' }}
+                  />
+                  <div className="form-hint">Ce commentaire sera conservé dans le journal d'audit.</div>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button type="button" onClick={() => setSelectedAnomaly(null)} className="btn btn-secondary">
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setSelectedAnomaly(null)}
+                >
                   Annuler
                 </button>
-                <button type="submit" disabled={submittingResolve} className="btn btn-primary">
-                  {submittingResolve ? 'Validation...' : 'Enregistrer la Régularisation'}
+                <button
+                  type="submit"
+                  disabled={submittingResolve || !resolutionNote.trim()}
+                  className="btn btn-primary"
+                >
+                  {submittingResolve ? (
+                    <>
+                      <span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
+                      Enregistrement...
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} />
+                      Enregistrer la régularisation
+                    </>
+                  )}
                 </button>
               </div>
             </form>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
-import { formatCurrency, Currency } from '@smart-pme/shared';
+import { formatCurrency } from '@smart-pme/shared';
 import {
   TrendingUp,
   Receipt,
@@ -11,23 +11,46 @@ import {
   AlertTriangle,
   Package,
   ShoppingCart,
-  CheckCircle,
-  ExternalLink
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+
+const statusLabel: Record<string, string> = {
+  COMPLETED: 'Complétée',
+  PENDING: 'En attente',
+  CANCELLED: 'Annulée',
+  PARTIAL: 'Partielle',
+};
+
+const statusClass: Record<string, string> = {
+  COMPLETED: 'badge-success',
+  PENDING: 'badge-warning',
+  CANCELLED: 'badge-danger',
+  PARTIAL: 'badge-info',
+};
+
+const severityClass: Record<string, string> = {
+  CRITICAL: 'badge-danger',
+  HIGH: 'badge-danger',
+  MEDIUM: 'badge-warning',
+  LOW: 'badge-neutral',
+};
 
 export const DashboardPage: React.FC = () => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const loadMetrics = async () => {
     try {
       setLoading(true);
+      setError(null);
       const res = await ApiClient.getDashboardMetrics();
       setData(res);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de charger les indicateurs.');
     } finally {
       setLoading(false);
     }
@@ -37,269 +60,277 @@ export const DashboardPage: React.FC = () => {
     loadMetrics();
   }, []);
 
-  if (loading || !data) {
+  if (loading) {
     return (
-      <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-        <div style={{ marginBottom: '1rem', fontSize: '1.1rem', fontWeight: 600 }}>Chargement des données financières en temps réel...</div>
+      <div className="loading-state">
+        <div className="spinner" />
+        <span>Chargement des indicateurs...</span>
       </div>
     );
   }
 
-  const { metrics, recentSales, recentInvoices, recentAnomalies } = data;
+  if (error) {
+    return (
+      <div className="alert alert-danger" style={{ marginBottom: 0 }}>
+        <AlertTriangle size={16} className="alert-icon" />
+        <div>
+          <div className="alert-title">Erreur de chargement</div>
+          <div className="alert-body">{error}</div>
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            style={{ marginTop: '8px' }}
+            onClick={loadMetrics}
+          >
+            <RefreshCw size={12} /> Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const { metrics, recentSales, recentAnomalies } = data;
 
   return (
-    <div style={{ padding: '2rem' }}>
-      {/* Alert Bar if Anomalies */}
+    <div>
+      {/* Bandeau anomalies actives */}
       {metrics.activeAnomaliesCount > 0 && (
-        <div style={{
-          background: 'linear-gradient(90deg, rgba(239, 68, 68, 0.2) 0%, rgba(239, 68, 68, 0.05) 100%)',
-          border: '1px solid rgba(239, 68, 68, 0.4)',
-          borderRadius: '12px',
-          padding: '1rem 1.5rem',
-          marginBottom: '2rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-            <ShieldAlert size={24} color="#EF4444" />
-            <div>
-              <div style={{ fontWeight: 700, color: '#FCA5A5' }}>
-                {metrics.activeAnomaliesCount} anomalie(s) ou alerte(s) de gestion requièrent votre attention
-              </div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Ruptures de stock critiques, remises exceptionnelles ou retards de règlement détectés automatiquement.
-              </div>
+        <div className="alert alert-warning" style={{ marginBottom: '20px' }}>
+          <ShieldAlert size={16} className="alert-icon" />
+          <div style={{ flex: 1 }}>
+            <div className="alert-title">
+              {metrics.activeAnomaliesCount} anomalie(s) en attente de traitement
+            </div>
+            <div className="alert-body">
+              Des anomalies ont été détectées automatiquement et nécessitent votre attention.
             </div>
           </div>
           <button
+            type="button"
+            className="btn btn-sm btn-secondary"
             onClick={() => navigate('/anomalies')}
-            className="btn btn-danger btn-sm"
+            style={{ flexShrink: 0, alignSelf: 'flex-start' }}
           >
-            Examiner les alertes
+            Voir les alertes <ExternalLink size={12} />
           </button>
         </div>
       )}
 
-      {/* KPI Cards Grid */}
+      {/* KPI Grid */}
       <div className="kpi-grid">
-        {/* CA Jour */}
         <div className="kpi-card">
           <div className="kpi-label">
-            <span>Chiffre d’affaires Jour</span>
-            <TrendingUp size={16} color="var(--primary-light)" />
+            <span>CA du jour</span>
+            <TrendingUp size={15} color="#2563EB" />
           </div>
           <div className="kpi-value">
             {formatCurrency(metrics.todaySales, metrics.primaryCurrency)}
           </div>
-          <div className="kpi-sub" style={{ color: '#34D399' }}>
-            {metrics.todaySalesCount} vente(s) enregistrée(s) aujourd’hui
-          </div>
+          <div className="kpi-sub">{metrics.todaySalesCount} vente(s) aujourd'hui</div>
         </div>
 
-        {/* CA Mois */}
         <div className="kpi-card">
           <div className="kpi-label">
-            <span>Revenus du Mois</span>
-            <ShoppingCart size={16} color="var(--accent-cyan)" />
+            <span>Revenus du mois</span>
+            <ShoppingCart size={15} color="#0891B2" />
           </div>
           <div className="kpi-value">
             {formatCurrency(metrics.monthlyRevenue, metrics.primaryCurrency)}
           </div>
-          <div className="kpi-sub">
-            Période en cours (base facturée & comptoir)
-          </div>
+          <div className="kpi-sub">Période en cours (ventes & factures)</div>
         </div>
 
-        {/* Marge Nette */}
         <div className="kpi-card">
           <div className="kpi-label">
-            <span>Marge Nette Réalisée</span>
-            <ArrowUpRight size={16} color="#10B981" />
+            <span>Marge nette</span>
+            <ArrowUpRight size={15} color={metrics.netMargin >= 0 ? '#16A34A' : '#DC2626'} />
           </div>
-          <div className="kpi-value" style={{ color: metrics.netMargin >= 0 ? '#34D399' : '#F87171' }}>
+          <div className="kpi-value" style={{ color: metrics.netMargin >= 0 ? '#16A34A' : '#DC2626' }}>
             {formatCurrency(metrics.netMargin, metrics.primaryCurrency)}
           </div>
-          <div className="kpi-sub">
-            Revenus moins Dépenses ({formatCurrency(metrics.monthlyExpenses, metrics.primaryCurrency)})
-          </div>
+          <div className="kpi-sub">Dépenses : {formatCurrency(metrics.monthlyExpenses, metrics.primaryCurrency)}</div>
         </div>
 
-        {/* Trésorerie Globale */}
         <div className="kpi-card">
           <div className="kpi-label">
-            <span>Trésorerie & Comptes</span>
-            <Wallet size={16} color="#F59E0B" />
+            <span>Trésorerie</span>
+            <Wallet size={15} color="#D97706" />
           </div>
           <div className="kpi-value">
             {formatCurrency(metrics.totalCashBalance, metrics.primaryCurrency)}
           </div>
-          <div className="kpi-sub">
-            Comptes Bancaires & Mobile Money
-          </div>
+          <div className="kpi-sub">Caisses & comptes bancaires</div>
         </div>
 
-        {/* Créances Clients */}
         <div className="kpi-card">
           <div className="kpi-label">
-            <span>Créances Clients</span>
-            <Receipt size={16} color="#3B82F6" />
+            <span>Créances clients</span>
+            <Receipt size={15} color="#2563EB" />
           </div>
           <div className="kpi-value">
             {formatCurrency(metrics.totalReceivables, metrics.primaryCurrency)}
           </div>
-          <div className="kpi-sub" style={{ color: '#FBBF24' }}>
-            {metrics.unpaidInvoicesCount} facture(s) en attente de solde
+          <div className="kpi-sub" style={{ color: metrics.unpaidInvoicesCount > 0 ? '#D97706' : undefined }}>
+            {metrics.unpaidInvoicesCount} facture(s) impayée(s)
           </div>
         </div>
 
-        {/* Dettes Fournisseurs */}
         <div className="kpi-card">
           <div className="kpi-label">
-            <span>Dettes Fournisseurs</span>
-            <ArrowDownRight size={16} color="#EC4899" />
+            <span>Dettes fournisseurs</span>
+            <ArrowDownRight size={15} color="#DC2626" />
           </div>
           <div className="kpi-value">
             {formatCurrency(metrics.totalPayables, metrics.primaryCurrency)}
           </div>
-          <div className="kpi-sub">
-            Engagements achats à régulariser
-          </div>
+          <div className="kpi-sub">Engagements achats à régulariser</div>
         </div>
 
-        {/* Ruptures Stock */}
         <div className="kpi-card">
           <div className="kpi-label">
-            <span>Articles en Stock Critique</span>
-            <Package size={16} color="#EF4444" />
+            <span>Stock critique</span>
+            <Package size={15} color={metrics.lowStockItemsCount > 0 ? '#DC2626' : '#16A34A'} />
           </div>
-          <div className="kpi-value" style={{ color: metrics.lowStockItemsCount > 0 ? '#F87171' : '#34D399' }}>
+          <div className="kpi-value" style={{ color: metrics.lowStockItemsCount > 0 ? '#DC2626' : '#16A34A' }}>
             {metrics.lowStockItemsCount}
           </div>
-          <div className="kpi-sub">
-            Sous le seuil d’alerte configuré
-          </div>
+          <div className="kpi-sub">Articles sous le seuil d'alerte</div>
         </div>
 
-        {/* Alertes d'anomalies */}
         <div className="kpi-card">
           <div className="kpi-label">
-            <span>Alertes IA & Métier</span>
-            <ShieldAlert size={16} color="#8B5CF6" />
+            <span>Anomalies actives</span>
+            <ShieldAlert size={15} color={metrics.activeAnomaliesCount > 0 ? '#D97706' : '#16A34A'} />
           </div>
-          <div className="kpi-value" style={{ color: metrics.activeAnomaliesCount > 0 ? '#FBBF24' : '#34D399' }}>
+          <div className="kpi-value" style={{ color: metrics.activeAnomaliesCount > 0 ? '#D97706' : '#16A34A' }}>
             {metrics.activeAnomaliesCount}
           </div>
-          <div className="kpi-sub">
-            Détection explicable en continu
-          </div>
+          <div className="kpi-sub">Détectées, en attente de résolution</div>
         </div>
       </div>
 
-      {/* Two Column Section: Recent Sales & Live Anomalies */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '2rem' }}>
-        {/* Left: Ventes Récentes */}
-        <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>
-              Dernières Opérations de Vente
-            </h3>
+      {/* Tableaux de bas de page */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '20px' }}>
+        {/* Ventes récentes */}
+        <div className="table-wrapper">
+          <div className="table-toolbar">
+            <span className="table-toolbar-title">Dernières ventes</span>
             <button
+              type="button"
+              className="btn btn-sm btn-secondary"
               onClick={() => navigate('/sales')}
-              className="btn btn-secondary btn-sm"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
             >
-              <span>Voir tout</span>
-              <ExternalLink size={14} />
+              Voir tout <ExternalLink size={12} />
             </button>
           </div>
-
           <div className="table-container">
-            <table className="custom-table">
-              <thead>
-                <tr>
-                  <th>N° Vente</th>
-                  <th>Client</th>
-                  <th>Articles</th>
-                  <th>Montant Total</th>
-                  <th>Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentSales.map((sale: any) => (
-                  <tr key={sale.id}>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--primary-light)' }}>
-                      {sale.saleNumber}
-                    </td>
-                    <td>{sale.customer?.name || 'Client Comptant'}</td>
-                    <td>{sale.items?.length || 0} article(s)</td>
-                    <td style={{ fontWeight: 700, color: '#fff' }}>
-                      {formatCurrency(Number(sale.total), sale.currency)}
-                    </td>
-                    <td>
-                      <span className="badge badge-success">Validée</span>
-                    </td>
+            {recentSales.length === 0 ? (
+              <div className="table-empty">
+                <ShoppingCart className="table-empty-icon" />
+                <div className="table-empty-title">Aucune vente enregistrée</div>
+                <div className="table-empty-sub">Les ventes apparaîtront ici après enregistrement.</div>
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate('/sales')}>
+                  Enregistrer une vente
+                </button>
+              </div>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>N° Vente</th>
+                    <th>Client</th>
+                    <th>Articles</th>
+                    <th className="col-amount">Montant</th>
+                    <th>Statut</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {recentSales.map((sale: any) => (
+                    <tr key={sale.id}>
+                      <td className="col-mono">{sale.saleNumber}</td>
+                      <td>{sale.customer?.name || 'Client comptant'}</td>
+                      <td>{sale.items?.length || 0}</td>
+                      <td className="col-amount">{formatCurrency(Number(sale.total), sale.currency)}</td>
+                      <td>
+                        <span className={`badge ${statusClass[sale.status] || 'badge-neutral'}`}>
+                          {statusLabel[sale.status] || sale.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
-        {/* Right: Alertes de Surveillance */}
-        <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>
-              Anomalies Détectées
-            </h3>
+        {/* Anomalies récentes */}
+        <div className="table-wrapper">
+          <div className="table-toolbar">
+            <span className="table-toolbar-title">Anomalies récentes</span>
             <button
+              type="button"
+              className="btn btn-sm btn-secondary"
               onClick={() => navigate('/anomalies')}
-              className="btn btn-secondary btn-sm"
             >
-              Centre d'alertes
+              Centre d'alertes <ExternalLink size={12} />
             </button>
           </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            {recentAnomalies.map((anom: any) => (
-              <div
-                key={anom.id}
-                style={{
-                  background: 'rgba(15, 23, 42, 0.7)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '10px',
-                  padding: '1rem',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '0.85rem',
-                }}
-              >
-                <div style={{
-                  padding: '6px',
-                  borderRadius: '8px',
-                  background: anom.severity === 'CRITICAL' || anom.severity === 'HIGH' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                  color: anom.severity === 'CRITICAL' || anom.severity === 'HIGH' ? '#EF4444' : '#F59E0B',
-                }}>
-                  <AlertTriangle size={18} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                    <strong style={{ fontSize: '0.9rem', color: '#fff' }}>{anom.title}</strong>
-                    <span className={`badge badge-${anom.severity === 'CRITICAL' || anom.severity === 'HIGH' ? 'danger' : 'warning'}`}>
-                      {anom.severity}
-                    </span>
+          {recentAnomalies.length === 0 ? (
+            <div className="table-empty">
+              <ShieldAlert className="table-empty-icon" />
+              <div className="table-empty-title">Aucune anomalie détectée</div>
+              <div className="table-empty-sub">Le système surveille les opérations en continu.</div>
+            </div>
+          ) : (
+            <div style={{ padding: '4px 0' }}>
+              {recentAnomalies.map((anom: any) => (
+                <div
+                  key={anom.id}
+                  style={{
+                    display: 'flex',
+                    gap: '12px',
+                    alignItems: 'flex-start',
+                    padding: '12px 16px',
+                    borderBottom: '1px solid #F1F5F9',
+                  }}
+                >
+                  <AlertTriangle
+                    size={15}
+                    style={{ flexShrink: 0, marginTop: '1px' }}
+                    color={anom.severity === 'CRITICAL' || anom.severity === 'HIGH' ? '#DC2626' : '#D97706'}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                      <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {anom.title}
+                      </span>
+                      <span className={`badge ${severityClass[anom.severity] || 'badge-neutral'}`} style={{ flexShrink: 0 }}>
+                        {anom.severity}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: '#6B7280', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {anom.explanation}
+                    </p>
+                    <div style={{ fontSize: '0.6875rem', color: '#9CA3AF', marginTop: '3px' }}>
+                      Valeur observée : <strong style={{ color: '#D97706' }}>{anom.observedValue}</strong>
+                      &nbsp;·&nbsp;{new Date(anom.createdAt).toLocaleDateString('fr-FR')}
+                    </div>
                   </div>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                    {anom.explanation}
-                  </p>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', marginTop: '0.35rem' }}>
-                    Observé : <strong style={{ color: '#FBBF24' }}>{anom.observedValue}</strong> • {new Date(anom.createdAt).toLocaleDateString('fr-FR')}
-                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
+      </div>
+
+      {/* Bouton actualiser */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+        <button type="button" className="btn btn-sm btn-secondary" onClick={loadMetrics}>
+          <RefreshCw size={13} /> Actualiser
+        </button>
       </div>
     </div>
   );

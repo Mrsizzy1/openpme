@@ -115,6 +115,19 @@ export class ApiClient {
     });
   }
 
+  static updateProduct(id: string, data: any) {
+    return this.request<any>(`/products/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static deleteProduct(id: string) {
+    return this.request<any>(`/products/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Customers
   static getCustomers(search?: string) {
     const params = new URLSearchParams();
@@ -126,6 +139,19 @@ export class ApiClient {
     return this.request<any>('/customers', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  static updateCustomer(id: string, data: any) {
+    return this.request<any>(`/customers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static deleteCustomer(id: string) {
+    return this.request<any>(`/customers/${id}`, {
+      method: 'DELETE',
     });
   }
 

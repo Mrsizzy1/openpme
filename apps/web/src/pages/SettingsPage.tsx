@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
-import { Building2, Save, DollarSign, Sliders, ShieldAlert, Check, FileText } from 'lucide-react';
+import { Building2, Save, DollarSign, Sliders, ShieldAlert, FileText, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 export const SettingsPage: React.FC = () => {
   const { organization, refreshProfile } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [savedSuccess, setSavedSuccess] = useState(false);
+  const { success, error: toastError } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  // Form states - Company Info
+  // Informations entreprise
   const [name, setName] = useState('');
   const [legalName, setLegalName] = useState('');
   const [taxId, setTaxId] = useState('');
@@ -19,16 +21,20 @@ export const SettingsPage: React.FC = () => {
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
 
-  // Form states - Settings
+  // Paramètres financiers
   const [primaryCurrency, setPrimaryCurrency] = useState('CDF');
   const [secondaryCurrency, setSecondaryCurrency] = useState('USD');
   const [exchangeRate, setExchangeRate] = useState('2850');
   const [taxRatePercent, setTaxRatePercent] = useState('16');
   const [enableTax, setEnableTax] = useState(true);
-  const [invoicePrefix, setInvoicePrefix] = useState('FAC-2026-');
+  const [invoicePrefix, setInvoicePrefix] = useState('FAC-');
+
+  // Seuils d'alerte
   const [alertMaxDiscount, setAlertMaxDiscount] = useState('15');
   const [alertLargeExpense, setAlertLargeExpense] = useState('2000000');
   const [alertCashDiscrepancy, setAlertCashDiscrepancy] = useState('15000');
+
+  // Mentions légales
   const [invoiceFooterNote, setInvoiceFooterNote] = useState('');
   const [bankDetails, setBankDetails] = useState('');
 
@@ -43,7 +49,6 @@ export const SettingsPage: React.FC = () => {
       setEmail(organization.email || '');
       setAddress(organization.address || '');
       setCity(organization.city || 'Kinshasa');
-
       const s = organization.settings;
       if (s) {
         setPrimaryCurrency(s.primaryCurrency || 'CDF');
@@ -51,7 +56,7 @@ export const SettingsPage: React.FC = () => {
         setExchangeRate(s.exchangeRateUsdToCdf?.toString() || '2850');
         setTaxRatePercent(s.taxRatePercent?.toString() || '16');
         setEnableTax(Boolean(s.enableTax));
-        setInvoicePrefix(s.invoicePrefix || 'FAC-2026-');
+        setInvoicePrefix(s.invoicePrefix || 'FAC-');
         setAlertMaxDiscount(s.alertMaxDiscountPercent?.toString() || '15');
         setAlertLargeExpense(s.alertLargeExpenseThreshold?.toString() || '2000000');
         setAlertCashDiscrepancy(s.alertCashDiscrepancyThreshold?.toString() || '15000');
@@ -63,333 +68,289 @@ export const SettingsPage: React.FC = () => {
 
   const handleSaveAll = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setSavedSuccess(false);
+    setFormError(null);
+
+    if (!name.trim()) {
+      setFormError('Le nom commercial de l\'entreprise est obligatoire.');
+      return;
+    }
+    if (!exchangeRate || parseFloat(exchangeRate) <= 0) {
+      setFormError('Le taux de change USD/CDF doit être supérieur à 0.');
+      return;
+    }
+
+    setSaving(true);
     try {
-      // 1. Update Profile
       await ApiClient.updateOrgProfile({
-        name,
-        legalName,
-        taxId,
-        rccm,
-        idNat,
-        phone,
-        email,
-        address,
-        city,
+        name: name.trim(),
+        legalName: legalName.trim() || undefined,
+        taxId: taxId.trim() || undefined,
+        rccm: rccm.trim() || undefined,
+        idNat: idNat.trim() || undefined,
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        address: address.trim() || undefined,
+        city: city.trim() || undefined,
       });
 
-      // 2. Update Settings
       await ApiClient.updateOrgSettings({
         primaryCurrency,
         secondaryCurrency,
         exchangeRateUsdToCdf: parseFloat(exchangeRate) || 2850,
         taxRatePercent: parseFloat(taxRatePercent) || 16,
         enableTax,
-        invoicePrefix,
+        invoicePrefix: invoicePrefix.trim() || 'FAC-',
         alertMaxDiscountPercent: parseFloat(alertMaxDiscount) || 15,
         alertLargeExpenseThreshold: parseFloat(alertLargeExpense) || 2000000,
         alertCashDiscrepancyThreshold: parseFloat(alertCashDiscrepancy) || 15000,
-        invoiceFooterNote,
-        bankDetails,
+        invoiceFooterNote: invoiceFooterNote.trim() || undefined,
+        bankDetails: bankDetails.trim() || undefined,
       });
 
       await refreshProfile();
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 4000);
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('smart_pme_sync_channel');
+        ch.postMessage({
+          type: 'EXCHANGE_RATE_UPDATED',
+          rate: parseFloat(exchangeRate) || 2850,
+        });
+        ch.close();
+      }
+      success('Paramètres enregistrés et synchronisés sur tous les postes.');
     } catch (err: any) {
-      alert(err.message || 'Erreur lors de la mise à jour des paramètres');
+      setFormError(err.message || 'Erreur lors de la sauvegarde des paramètres.');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
+  const SectionTitle: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon, label }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', paddingBottom: '10px', borderBottom: '1px solid #E2E8F0' }}>
+      <div style={{ color: '#2563EB', display: 'flex' }}>{icon}</div>
+      <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#111827' }}>{label}</h3>
+    </div>
+  );
+
   return (
-    <div style={{ padding: '2rem', maxWidth: '1000px' }}>
-      {savedSuccess && (
-        <div style={{
-          background: 'rgba(16, 185, 129, 0.2)',
-          border: '1px solid #10B981',
-          borderRadius: '10px',
-          padding: '1rem',
-          color: '#A7F3D0',
-          marginBottom: '1.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-        }}>
-          <Check size={20} color="#10B981" />
-          <span>Paramètres de l'entreprise mis à jour avec succès et appliqués à tous les modules.</span>
+    <div>
+      {formError && (
+        <div className="alert alert-danger" style={{ marginBottom: '20px' }}>
+          <AlertTriangle size={15} className="alert-icon" />
+          <span>{formError}</span>
         </div>
       )}
 
       <form onSubmit={handleSaveAll}>
-        {/* Section 1 : Informations Légales */}
-        <div className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Building2 size={20} color="var(--primary-light)" />
-            <span>Identité & Données Légales de l’Entreprise (RDC)</span>
-          </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-            Ces informations figurent automatiquement sur les factures, devis et rapports légaux.
-          </p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Nom Commercial *
-              </label>
-              <input
-                type="text"
-                required
-                className="input-field"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
+        {/* ── Section 1 : Identité de l'entreprise ── */}
+        <div className="card" style={{ marginBottom: '20px' }}>
+          <div className="card-body">
+            <SectionTitle icon={<Building2 size={16} />} label="Identité de l'entreprise" />
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-name">
+                  Nom commercial <span className="required">*</span>
+                </label>
+                <input id="set-name" type="text" required className="input-field"
+                  placeholder="ex : Commerce DIALLO SARL" value={name}
+                  onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-legal">Dénomination légale</label>
+                <input id="set-legal" type="text" className="input-field"
+                  placeholder="Raison sociale officielle" value={legalName}
+                  onChange={(e) => setLegalName(e.target.value)} />
+              </div>
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Raison Sociale Complète
-              </label>
-              <input
-                type="text"
-                className="input-field"
-                value={legalName}
-                onChange={(e) => setLegalName(e.target.value)}
-              />
+
+            <div className="form-grid-3">
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-taxid">NIF (Numéro fiscal)</label>
+                <input id="set-taxid" type="text" className="input-field"
+                  placeholder="A0000000X" value={taxId}
+                  onChange={(e) => setTaxId(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-rccm">N° RCCM</label>
+                <input id="set-rccm" type="text" className="input-field"
+                  placeholder="CD/KIN/RCCM/..." value={rccm}
+                  onChange={(e) => setRccm(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-idnat">Identifiant National</label>
+                <input id="set-idnat" type="text" className="input-field"
+                  placeholder="ID NAT" value={idNat}
+                  onChange={(e) => setIdNat(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-phone">Téléphone</label>
+                <input id="set-phone" type="tel" className="input-field"
+                  placeholder="+243 8X XXX XXXX" value={phone}
+                  onChange={(e) => setPhone(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-email">E-mail</label>
+                <input id="set-email" type="email" className="input-field"
+                  placeholder="contact@monentreprise.cd" value={email}
+                  onChange={(e) => setEmail(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-address">Adresse physique</label>
+                <input id="set-address" type="text" className="input-field"
+                  placeholder="Avenue, N°, Commune" value={address}
+                  onChange={(e) => setAddress(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-city">Ville</label>
+                <input id="set-city" type="text" className="input-field"
+                  placeholder="Kinshasa" value={city}
+                  onChange={(e) => setCity(e.target.value)} />
+              </div>
             </div>
           </div>
+        </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Numéro Impôt (NIF)
-              </label>
-              <input
-                type="text"
-                placeholder="A0000000X"
-                className="input-field"
-                value={taxId}
-                onChange={(e) => setTaxId(e.target.value)}
-              />
+        {/* ── Section 2 : Paramètres financiers ── */}
+        <div className="card" style={{ marginBottom: '20px' }}>
+          <div className="card-body">
+            <SectionTitle icon={<DollarSign size={16} />} label="Devise & Fiscalité" />
+            <div className="form-grid-3">
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-curr">Devise principale</label>
+                <select id="set-curr" className="input-field" value={primaryCurrency}
+                  onChange={(e) => setPrimaryCurrency(e.target.value)}>
+                  <option value="CDF">CDF — Franc Congolais</option>
+                  <option value="USD">USD — Dollar américain</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-curr2">Devise secondaire</label>
+                <select id="set-curr2" className="input-field" value={secondaryCurrency}
+                  onChange={(e) => setSecondaryCurrency(e.target.value)}>
+                  <option value="USD">USD — Dollar américain</option>
+                  <option value="CDF">CDF — Franc Congolais</option>
+                  <option value="EUR">EUR — Euro</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-rate">
+                  Taux 1 USD → CDF <span className="required">*</span>
+                </label>
+                <input id="set-rate" type="number" min="1" step="1" required className="input-field"
+                  value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+              </div>
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Numéro RCCM
-              </label>
-              <input
-                type="text"
-                placeholder="CD/KIN/RCCM/..."
-                className="input-field"
-                value={rccm}
-                onChange={(e) => setRccm(e.target.value)}
-              />
+
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">TVA applicable</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                  <input type="checkbox" id="set-tax" checked={enableTax}
+                    onChange={(e) => setEnableTax(e.target.checked)}
+                    style={{ width: '14px', height: '14px', cursor: 'pointer' }} />
+                  <label htmlFor="set-tax" style={{ fontSize: '0.8125rem', color: '#374151', cursor: 'pointer' }}>
+                    Activer la TVA sur les ventes
+                  </label>
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-taxrate">Taux TVA (%)</label>
+                <input id="set-taxrate" type="number" min="0" max="100" step="0.1"
+                  className="input-field" value={taxRatePercent} disabled={!enableTax}
+                  onChange={(e) => setTaxRatePercent(e.target.value)} />
+              </div>
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Identification Nationale (ID NAT)
-              </label>
-              <input
-                type="text"
-                placeholder="01-00-..."
-                className="input-field"
-                value={idNat}
-                onChange={(e) => setIdNat(e.target.value)}
-              />
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="set-prefix">Préfixe de numérotation des factures</label>
+              <input id="set-prefix" type="text" className="input-field"
+                placeholder="FAC-" value={invoicePrefix}
+                onChange={(e) => setInvoicePrefix(e.target.value)} />
+              <div className="form-hint">Ex. : FAC- → FAC-000001, FAC-2026- → FAC-2026-000001</div>
             </div>
           </div>
+        </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Téléphone principal
-              </label>
-              <input
-                type="text"
+        {/* ── Section 3 : Seuils d'alerte ── */}
+        <div className="card" style={{ marginBottom: '20px' }}>
+          <div className="card-body">
+            <SectionTitle icon={<ShieldAlert size={16} />} label="Seuils de détection des anomalies" />
+            <div className="form-grid-3">
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-disc">Remise maximale autorisée (%)</label>
+                <input id="set-disc" type="number" min="0" max="100" step="0.5"
+                  className="input-field" value={alertMaxDiscount}
+                  onChange={(e) => setAlertMaxDiscount(e.target.value)} />
+                <div className="form-hint">Au-delà, une anomalie est créée automatiquement.</div>
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-exp">Seuil grande dépense (CDF)</label>
+                <input id="set-exp" type="number" min="0" step="1000"
+                  className="input-field" value={alertLargeExpense}
+                  onChange={(e) => setAlertLargeExpense(e.target.value)} />
+                <div className="form-hint">Dépense unique au-delà de ce montant → alerte.</div>
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="set-cash">Écart de caisse toléré (CDF)</label>
+                <input id="set-cash" type="number" min="0" step="100"
+                  className="input-field" value={alertCashDiscrepancy}
+                  onChange={(e) => setAlertCashDiscrepancy(e.target.value)} />
+                <div className="form-hint">Écart comptant/théorique déclenchant une alerte.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Section 4 : Mentions légales ── */}
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <div className="card-body">
+            <SectionTitle icon={<FileText size={16} />} label="Mentions légales & coordonnées bancaires" />
+            <div className="form-group">
+              <label className="form-label" htmlFor="set-footer">Pied de facture</label>
+              <textarea
+                id="set-footer"
+                rows={2}
                 className="input-field"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                placeholder="ex : Facture certifiée conforme — RDC. Tout retard de paiement entraîne des pénalités de 2% par mois."
+                value={invoiceFooterNote}
+                onChange={(e) => setInvoiceFooterNote(e.target.value)}
+                style={{ resize: 'vertical' }}
               />
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Email de facturation
-              </label>
-              <input
-                type="email"
+            <div className="form-group">
+              <label className="form-label" htmlFor="set-bank">Coordonnées bancaires</label>
+              <textarea
+                id="set-bank"
+                rows={2}
                 className="input-field"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Ville / Commune
-              </label>
-              <input
-                type="text"
-                className="input-field"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
+                placeholder="ex : Rawbank Kinshasa — IBAN : CD... — SWIFT : ..."
+                value={bankDetails}
+                onChange={(e) => setBankDetails(e.target.value)}
+                style={{ resize: 'vertical' }}
               />
             </div>
           </div>
         </div>
 
-        {/* Section 2 : Fiscalité & Multi-devises */}
-        <div className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <DollarSign size={20} color="#10B981" />
-            <span>Devises, Taux de Change & Paramètres Fiscaux</span>
-          </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-            Gestion de la parité Franc Congolais (CDF) et Dollar Américain (USD).
-          </p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Devise Principale de Tenue
-              </label>
-              <select
-                className="input-field"
-                value={primaryCurrency}
-                onChange={(e) => setPrimaryCurrency(e.target.value)}
-              >
-                <option value="CDF">CDF - Franc Congolais</option>
-                <option value="USD">USD - Dollar Américain</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Taux de change (1 USD = X CDF) *
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                className="input-field"
-                value={exchangeRate}
-                onChange={(e) => setExchangeRate(e.target.value)}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Taux de TVA légal (%) *
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                className="input-field"
-                value={taxRatePercent}
-                onChange={(e) => setTaxRatePercent(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input
-              type="checkbox"
-              id="taxActive"
-              checked={enableTax}
-              onChange={(e) => setEnableTax(e.target.checked)}
-            />
-            <label htmlFor="taxActive" style={{ fontSize: '0.85rem', color: 'var(--text-main)', cursor: 'pointer' }}>
-              Appliquer la TVA sur les factures de vente (16% en RDC)
-            </label>
-          </div>
-        </div>
-
-        {/* Section 3 : Seuils de Contrôle et Détection des Anomalies */}
-        <div className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <ShieldAlert size={20} color="#F59E0B" />
-            <span>Seuils de Détection des Anomalies & Alertes</span>
-          </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-            Règles de surveillance qui déclenchent automatiquement des alertes lors des opérations quotidiennes.
-          </p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Remise Max Autorisée sans Alerte (%)
-              </label>
-              <input
-                type="number"
-                className="input-field"
-                value={alertMaxDiscount}
-                onChange={(e) => setAlertMaxDiscount(e.target.value)}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Seuil Dépense Exceptionnelle (CDF)
-              </label>
-              <input
-                type="number"
-                className="input-field"
-                value={alertLargeExpense}
-                onChange={(e) => setAlertLargeExpense(e.target.value)}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                Tolérance Écart de Caisse (CDF)
-              </label>
-              <input
-                type="number"
-                className="input-field"
-                value={alertCashDiscrepancy}
-                onChange={(e) => setAlertCashDiscrepancy(e.target.value)}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Section 4 : Mentions Documents */}
-        <div className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <FileText size={20} color="var(--accent-cyan)" />
-            <span>Pied de page & Coordonnées Bancaires des Factures</span>
-          </h3>
-
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-              Coordonnées bancaires & Mobile Money affichés sur les factures
-            </label>
-            <input
-              type="text"
-              className="input-field"
-              value={bankDetails}
-              onChange={(e) => setBankDetails(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-              Mentions Légales / Conditions en bas de page
-            </label>
-            <textarea
-              className="input-field"
-              rows={2}
-              value={invoiceFooterNote}
-              onChange={(e) => setInvoiceFooterNote(e.target.value)}
-            />
-          </div>
-        </div>
-
-        {/* Save button */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '3rem' }}>
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn btn-primary"
-            style={{ padding: '0.85rem 2rem', fontSize: '1rem' }}
-          >
-            <Save size={18} />
-            <span>{loading ? 'Enregistrement des paramètres...' : 'Enregistrer les Modifications'}</span>
+        {/* Bouton enregistrer */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+          <button type="submit" disabled={saving} className="btn btn-primary btn-lg">
+            {saving ? (
+              <>
+                <span className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
+                Enregistrement...
+              </>
+            ) : (
+              <>
+                <Save size={16} />
+                Enregistrer les paramètres
+              </>
+            )}
           </button>
         </div>
       </form>

@@ -11,58 +11,94 @@ import {
   Building,
   Smartphone,
   X,
-  CheckCircle
+  RefreshCw,
+  CheckCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+
+const EXPENSE_CATEGORIES = [
+  'Frais de fonctionnement',
+  'Salaires & RH',
+  'Loyer & charges immobilières',
+  'Transport & déplacements',
+  'Fournitures & consommables',
+  'Télécommunications',
+  'Eau & électricité',
+  'Marketing & publicité',
+  'Achats de marchandises',
+  'Frais bancaires',
+  'Taxes & impôts',
+  'Maintenance & réparations',
+  'Autres dépenses',
+];
 
 export const FinancesPage: React.FC = () => {
-  const { organization } = useAuth();
+  const { organization, user } = useAuth();
+  const { success, error: toastError } = useToast();
+  const isManager = user?.role === 'ORG_OWNER' || user?.role === 'MANAGER' || user?.role === 'SUPER_ADMIN';
+
   const [expenses, setExpenses] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [cashRegisters, setCashRegisters] = useState<any[]>([]);
   const [currentSession, setCurrentSession] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // New Expense modal
+  // Modal dépense
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [expCategory, setExpCategory] = useState('Frais de Fonctionnement');
+  const [expCategory, setExpCategory] = useState('Frais de fonctionnement');
   const [expAmount, setExpAmount] = useState('');
   const [expBeneficiary, setExpBeneficiary] = useState('');
   const [expMethod, setExpMethod] = useState('CASH');
   const [expRef, setExpRef] = useState('');
   const [expAccountId, setExpAccountId] = useState('');
   const [expNotes, setExpNotes] = useState('');
+  const [expError, setExpError] = useState<string | null>(null);
   const [submittingExpense, setSubmittingExpense] = useState(false);
 
-  // Cash Session Modals
+  // Modal ouverture caisse
   const [showOpenModal, setShowOpenModal] = useState(false);
-  const [openBalance, setOpenBalance] = useState('200000');
+  const [openBalance, setOpenBalance] = useState('');
   const [selectedRegisterId, setSelectedRegisterId] = useState('');
   const [openNotes, setOpenNotes] = useState('');
+  const [openError, setOpenError] = useState<string | null>(null);
   const [submittingOpen, setSubmittingOpen] = useState(false);
 
+  // Modal clôture caisse & Billetage à l'aveugle
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [countedBalance, setCountedBalance] = useState('');
   const [closeNotes, setCloseNotes] = useState('');
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [submittingClose, setSubmittingClose] = useState(false);
+
+  // Billetage CDF
+  const [useBilletage, setUseBilletage] = useState(false);
+  const [b20k, setB20k] = useState<string>('');
+  const [b10k, setB10k] = useState<string>('');
+  const [b5k, setB5k] = useState<string>('');
+  const [b1k, setB1k] = useState<string>('');
+  const [b500, setB500] = useState<string>('');
+  const [bPieces, setBPieces] = useState<string>('');
 
   const loadFinances = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const [exps, accs, regs, session] = await Promise.all([
         ApiClient.getExpenses(),
         ApiClient.getFinancialAccounts(),
         ApiClient.getCashRegisters(),
-        ApiClient.getCurrentCashSession(),
+        ApiClient.getCurrentCashSession().catch(() => null),
       ]);
       setExpenses(exps);
       setAccounts(accs);
       setCashRegisters(regs);
       setCurrentSession(session);
-      if (regs.length > 0) setSelectedRegisterId(regs[0].id);
-      if (accs.length > 0) setExpAccountId(accs[0].id);
-    } catch (err) {
-      console.error(err);
+      if (regs.length > 0 && !selectedRegisterId) setSelectedRegisterId(regs[0].id);
+      if (accs.length > 0 && !expAccountId) setExpAccountId(accs[0].id);
+    } catch (err: any) {
+      setLoadError(err.message || 'Impossible de charger les données financières.');
     } finally {
       setLoading(false);
     }
@@ -74,24 +110,37 @@ export const FinancesPage: React.FC = () => {
 
   const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    setExpError(null);
+    const amt = parseFloat(expAmount);
+    if (!amt || amt <= 0) {
+      setExpError('Le montant doit être supérieur à 0.');
+      return;
+    }
+    if (!expBeneficiary.trim()) {
+      setExpError('Le bénéficiaire est obligatoire.');
+      return;
+    }
     setSubmittingExpense(true);
     try {
       await ApiClient.createExpense({
         category: expCategory,
-        amount: parseFloat(expAmount),
-        beneficiary: expBeneficiary,
+        amount: amt,
+        beneficiary: expBeneficiary.trim(),
         method: expMethod,
-        reference: expRef,
+        reference: expRef.trim() || undefined,
         financialAccountId: expAccountId || undefined,
-        notes: expNotes,
+        notes: expNotes.trim() || undefined,
+        currency: 'CDF',
       });
       setShowExpenseModal(false);
       setExpAmount('');
       setExpBeneficiary('');
       setExpRef('');
+      setExpNotes('');
+      success(`Dépense de ${formatCurrency(amt, Currency.CDF)} enregistrée.`);
       loadFinances();
     } catch (err: any) {
-      alert(err.message || 'Erreur lors de l’enregistrement de la dépense');
+      setExpError(err.message || 'Erreur lors de l\'enregistrement de la dépense.');
     } finally {
       setSubmittingExpense(false);
     }
@@ -99,17 +148,30 @@ export const FinancesPage: React.FC = () => {
 
   const handleOpenSession = async (e: React.FormEvent) => {
     e.preventDefault();
+    setOpenError(null);
+    const bal = parseFloat(openBalance);
+    if (isNaN(bal) || bal < 0) {
+      setOpenError('Le fond d\'ouverture doit être un nombre valide (0 ou plus).');
+      return;
+    }
+    if (!selectedRegisterId) {
+      setOpenError('Veuillez sélectionner une caisse.');
+      return;
+    }
     setSubmittingOpen(true);
     try {
       await ApiClient.openCashSession({
         cashRegisterId: selectedRegisterId,
-        openingBalance: parseFloat(openBalance),
-        notes: openNotes,
+        openingBalance: bal,
+        notes: openNotes.trim() || undefined,
       });
       setShowOpenModal(false);
+      setOpenBalance('');
+      setOpenNotes('');
+      success('Session de caisse ouverte avec succès.');
       loadFinances();
     } catch (err: any) {
-      alert(err.message || 'Erreur lors de l’ouverture de caisse');
+      setOpenError(err.message || 'Erreur lors de l\'ouverture de la caisse.');
     } finally {
       setSubmittingOpen(false);
     }
@@ -118,317 +180,342 @@ export const FinancesPage: React.FC = () => {
   const handleCloseSession = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentSession) return;
+    setCloseError(null);
+    const counted = parseFloat(countedBalance);
+    if (isNaN(counted) || counted < 0) {
+      setCloseError('Veuillez saisir un solde compté valide.');
+      return;
+    }
     setSubmittingClose(true);
     try {
-      await ApiClient.closeCashSession(
-        currentSession.id,
-        parseFloat(countedBalance),
-        closeNotes
-      );
+      await ApiClient.closeCashSession(currentSession.id, counted, closeNotes.trim() || undefined);
       setShowCloseModal(false);
+      setCountedBalance('');
+      setCloseNotes('');
+      success('Caisse clôturée et enregistrée avec succès.');
       loadFinances();
     } catch (err: any) {
-      alert(err.message || 'Erreur lors de la clôture de caisse');
+      setCloseError(err.message || 'Erreur lors de la clôture de caisse.');
     } finally {
       setSubmittingClose(false);
     }
   };
 
-  // Session calculations
-  const totalSessionCashPayments = currentSession?.payments?.reduce((acc: number, p: any) => acc + Number(p.amount), 0) || 0;
-  const theoreticalSessionTotal = roundMoney((Number(currentSession?.openingBalance) || 0) + totalSessionCashPayments);
-  const counted = parseFloat(countedBalance) || 0;
-  const diff = roundMoney(counted - theoreticalSessionTotal);
+  // Calculs session
+  const totalSessionCash = currentSession?.payments?.reduce((acc: number, p: any) => acc + Number(p.amount), 0) || 0;
+  const theoreticalTotal = roundMoney((Number(currentSession?.openingBalance) || 0) + totalSessionCash);
+  const countedVal = parseFloat(countedBalance) || 0;
+  const diff = roundMoney(countedVal - theoreticalTotal);
+
+  if (loading) {
+    return (
+      <div className="loading-state">
+        <div className="spinner" />
+        <span>Chargement...</span>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="alert alert-danger">
+        <AlertTriangle size={15} className="alert-icon" />
+        <div>
+          <div className="alert-title">Erreur de chargement</div>
+          <div className="alert-body">{loadError}</div>
+          <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: '8px' }} onClick={loadFinances}>
+            <RefreshCw size={12} /> Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: '2rem' }}>
-      {/* Financial Accounts & Cash Registers Overview */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
-        {/* Cash Register Session Card */}
-        <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+    <div>
+      {/* Ligne supérieure : caisse + comptes */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+        {/* Session de caisse */}
+        <div className="card">
+          <div className="card-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{
-                padding: '8px',
-                borderRadius: '10px',
-                background: currentSession ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                color: currentSession ? '#34D399' : '#FBBF24',
+                width: '28px', height: '28px',
+                borderRadius: '6px',
+                background: currentSession ? '#F0FDF4' : '#FFFBEB',
+                border: `1px solid ${currentSession ? '#BBF7D0' : '#FDE68A'}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
               }}>
-                {currentSession ? <Unlock size={20} /> : <Lock size={20} />}
+                {currentSession
+                  ? <Unlock size={15} color="#16A34A" />
+                  : <Lock size={15} color="#D97706" />}
               </div>
-              <div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff' }}>
-                  {currentSession ? 'Session de Caisse Active' : 'Caisse Actuellement Fermée'}
-                </h3>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  {currentSession ? `Ouverte le ${new Date(currentSession.openedAt).toLocaleDateString('fr-FR')} par ${currentSession.user?.firstName || 'Caissier'}` : 'Aucune caisse ouverte'}
-                </div>
-              </div>
+              <span className="card-title">
+                {currentSession ? 'Session de caisse ouverte' : 'Caisse fermée'}
+              </span>
             </div>
-
             {currentSession ? (
               <button
+                type="button"
+                className="btn btn-sm btn-danger-outline"
                 onClick={() => {
-                  setCountedBalance(theoreticalSessionTotal.toString());
+                  setCountedBalance(String(theoreticalTotal));
+                  setCloseError(null);
                   setShowCloseModal(true);
                 }}
-                className="btn btn-danger btn-sm"
               >
-                <Lock size={15} />
-                <span>Clôturer la Caisse</span>
+                <Lock size={13} /> Clôturer
               </button>
             ) : (
               <button
-                onClick={() => setShowOpenModal(true)}
-                className="btn btn-primary btn-sm"
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={() => { setOpenError(null); setShowOpenModal(true); }}
+                disabled={cashRegisters.length === 0}
               >
-                <Unlock size={15} />
-                <span>Ouvrir une Caisse</span>
+                <Unlock size={13} /> Ouvrir
               </button>
             )}
           </div>
-
-          {currentSession && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '10px' }}>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Fond Initial :</div>
-                <div style={{ fontWeight: 700, color: '#fff', fontSize: '1rem' }}>
-                  {formatCurrency(Number(currentSession.openingBalance), currentSession.currency)}
+          <div className="card-body">
+            {currentSession ? (
+              <>
+                <div style={{ fontSize: '0.75rem', color: '#6B7280', marginBottom: '10px' }}>
+                  Ouverte le {new Date(currentSession.openedAt).toLocaleString('fr-FR')}&ensp;·&ensp;
+                  {currentSession.user?.firstName} {currentSession.user?.lastName}
                 </div>
-              </div>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Espèces Encaissées :</div>
-                <div style={{ fontWeight: 700, color: '#34D399', fontSize: '1rem' }}>
-                  +{formatCurrency(totalSessionCashPayments, currentSession.currency)}
+                <div className="totals-box">
+                  <div className="stat-line">
+                    <span className="stat-line-label">Fond d'ouverture</span>
+                    <span className="stat-line-value">{formatCurrency(Number(currentSession.openingBalance), currentSession.currency || Currency.CDF)}</span>
+                  </div>
+                  <div className="stat-line">
+                    <span className="stat-line-label">Espèces encaissées</span>
+                    <span className="stat-line-value" style={{ color: '#16A34A' }}>
+                      +{formatCurrency(totalSessionCash, currentSession.currency || Currency.CDF)}
+                    </span>
+                  </div>
+                  <div className="stat-line">
+                    <span className="stat-line-label">Total théorique</span>
+                    <span className="stat-line-value font-bold">{formatCurrency(theoreticalTotal, currentSession.currency || Currency.CDF)}</span>
+                  </div>
                 </div>
+              </>
+            ) : (
+              <div className="table-empty" style={{ minHeight: '80px' }}>
+                <div className="table-empty-sub">Aucune caisse ouverte. Ouvrez une session pour enregistrer les encaissements.</div>
               </div>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Solde Théorique :</div>
-                <div style={{ fontWeight: 800, color: 'var(--primary-light)', fontSize: '1.05rem' }}>
-                  {formatCurrency(theoreticalSessionTotal, currentSession.currency)}
-                </div>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {/* Financial Accounts (Banks + M-Pesa) */}
-        <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff', marginBottom: '1rem' }}>
-            Comptes Bancaires & Mobile Money
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {accounts.map((acc) => (
-              <div
-                key={acc.id}
-                style={{
-                  background: 'rgba(15, 23, 42, 0.6)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '10px',
-                  padding: '0.85rem 1rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  {acc.type === 'MOBILE_MONEY' ? (
-                    <Smartphone size={20} color="#F59E0B" />
-                  ) : (
-                    <Building size={20} color="#3B82F6" />
-                  )}
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#fff' }}>{acc.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontFamily: 'var(--font-mono)' }}>
-                      N° {acc.accountNumber || '-'}
+        {/* Comptes financiers */}
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Comptes financiers</span>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={loadFinances}>
+              <RefreshCw size={12} />
+            </button>
+          </div>
+          <div className="card-body" style={{ padding: '0' }}>
+            {accounts.length === 0 ? (
+              <div className="table-empty" style={{ minHeight: '80px' }}>
+                <div className="table-empty-sub">Aucun compte enregistré.</div>
+              </div>
+            ) : (
+              <div>
+                {accounts.map((acc: any) => (
+                  <div key={acc.id} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: '12px 20px',
+                    borderBottom: '1px solid #F1F5F9',
+                  }}>
+                    <div style={{
+                      width: '32px', height: '32px',
+                      borderRadius: '8px',
+                      background: acc.type === 'BANK' ? '#EFF6FF' : '#F0FDF4',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      {acc.type === 'BANK'
+                        ? <Building size={15} color="#2563EB" />
+                        : <Smartphone size={15} color="#16A34A" />}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#111827' }}>{acc.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>{acc.type === 'BANK' ? 'Compte bancaire' : 'Mobile Money'}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: Number(acc.balance) >= 0 ? '#111827' : '#DC2626', fontFamily: "'JetBrains Mono', monospace" }}>
+                        {formatCurrency(Number(acc.balance), acc.currency || Currency.CDF)}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: 800, color: '#fff', fontSize: '1rem' }}>
-                    {formatCurrency(Number(acc.balance), acc.currency)}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: '#10B981', fontWeight: 600 }}>Actif</div>
-                </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>
 
-      {/* Expenses Section */}
-      <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-          <div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff' }}>
-              Journal des Dépenses & Décaissements
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Suivi des charges d'exploitation et pièces justificatives
-            </p>
+      {/* Journal des dépenses */}
+      <div className="table-wrapper">
+        <div className="table-toolbar">
+          <span className="table-toolbar-title">Journal des dépenses</span>
+          <div className="table-toolbar-actions">
+            <button type="button" className="btn btn-sm btn-secondary" onClick={loadFinances}>
+              <RefreshCw size={13} />
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setExpError(null);
+                setExpAmount('');
+                setExpBeneficiary('');
+                setExpRef('');
+                setExpNotes('');
+                setShowExpenseModal(true);
+              }}
+            >
+              <Plus size={14} />
+              Nouvelle dépense
+            </button>
           </div>
-          <button
-            onClick={() => setShowExpenseModal(true)}
-            className="btn btn-primary btn-sm"
-          >
-            <Plus size={16} />
-            <span>Enregistrer une Dépense</span>
-          </button>
         </div>
-
         <div className="table-container">
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>N° Pièce</th>
-                <th>Date</th>
-                <th>Catégorie</th>
-                <th>Bénéficiaire</th>
-                <th>Moyen de Règlement</th>
-                <th>Montant</th>
-                <th>Compte Débité</th>
-                <th>Responsable</th>
-              </tr>
-            </thead>
-            <tbody>
-              {expenses.map((e) => (
-                <tr key={e.id}>
-                  <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--primary-light)' }}>
-                    {e.expenseNumber}
-                  </td>
-                  <td>{new Date(e.date).toLocaleDateString('fr-FR')}</td>
-                  <td>
-                    <span className="badge badge-info">{e.category}</span>
-                  </td>
-                  <td style={{ fontWeight: 600, color: '#fff' }}>{e.beneficiary}</td>
-                  <td>{e.method}</td>
-                  <td style={{ fontWeight: 700, color: '#F87171' }}>
-                    - {formatCurrency(Number(e.amount), e.currency)}
-                  </td>
-                  <td>{e.financialAccount?.name || 'Caisse Espèces'}</td>
-                  <td>{e.user?.firstName} {e.user?.lastName}</td>
+          {expenses.length === 0 ? (
+            <div className="table-empty">
+              <ArrowDownCircle className="table-empty-icon" />
+              <div className="table-empty-title">Aucune dépense enregistrée</div>
+              <div className="table-empty-sub">Les dépenses enregistrées apparaîtront ici.</div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => { setExpError(null); setShowExpenseModal(true); }}>
+                <Plus size={13} /> Enregistrer une dépense
+              </button>
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Catégorie</th>
+                  <th>Bénéficiaire</th>
+                  <th>Mode</th>
+                  <th>Référence</th>
+                  <th className="col-amount">Montant</th>
+                  <th>Note</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {expenses.map((exp: any) => (
+                  <tr key={exp.id}>
+                    <td style={{ fontSize: '0.8125rem' }}>{new Date(exp.createdAt).toLocaleDateString('fr-FR')}</td>
+                    <td>
+                      <span className="badge badge-neutral">{exp.category}</span>
+                    </td>
+                    <td style={{ fontWeight: 500 }}>{exp.beneficiary}</td>
+                    <td style={{ fontSize: '0.75rem', color: '#6B7280' }}>{exp.method}</td>
+                    <td className="col-mono">{exp.reference || <span className="text-tertiary">—</span>}</td>
+                    <td className="col-amount text-danger font-semibold">
+                      − {formatCurrency(Number(exp.amount), exp.currency || 'CDF')}
+                    </td>
+                    <td style={{ fontSize: '0.75rem', color: '#6B7280', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {exp.notes || <span className="text-tertiary">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
-      {/* Modal: New Expense */}
+      {/* ── Modal Nouvelle Dépense ── */}
       {showExpenseModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ padding: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>
-                Enregistrer une Dépense
-              </h3>
-              <button onClick={() => setShowExpenseModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-subtle)', cursor: 'pointer' }}>
-                <X size={20} />
+          <div className="modal">
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ArrowDownCircle size={16} color="#DC2626" />
+                <span className="modal-title">Enregistrer une dépense</span>
+              </div>
+              <button type="button" className="btn-close" onClick={() => setShowExpenseModal(false)} aria-label="Fermer">
+                <X size={18} />
               </button>
             </div>
-
             <form onSubmit={handleCreateExpense}>
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Catégorie de la dépense *
-                </label>
-                <select
-                  className="input-field"
-                  value={expCategory}
-                  onChange={(e) => setExpCategory(e.target.value)}
-                >
-                  <option value="Loyer & Charges Immobilières">Loyer & Charges Immobilières</option>
-                  <option value="Énergie & Électricité SNEL">Énergie & Électricité SNEL</option>
-                  <option value="Eau Régideso">Eau Régideso</option>
-                  <option value="Frais de Transport & Logistique">Frais de Transport & Logistique</option>
-                  <option value="Fournitures de bureau">Fournitures de bureau</option>
-                  <option value="Salaires & Rémunérations">Salaires & Rémunérations</option>
-                  <option value="Communication & Internet">Communication & Internet</option>
-                  <option value="Divers & Imprévus">Divers & Imprévus</option>
-                </select>
-              </div>
+              <div className="modal-body">
+                {expError && (
+                  <div className="alert alert-danger" style={{ marginBottom: '14px' }}>
+                    <AlertTriangle size={14} className="alert-icon" />
+                    <span>{expError}</span>
+                  </div>
+                )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                    Montant (CDF) *
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    className="input-field"
-                    value={expAmount}
-                    onChange={(e) => setExpAmount(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                    Bénéficiaire / Fournisseur *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Nom du bénéficiaire"
-                    className="input-field"
-                    value={expBeneficiary}
-                    onChange={(e) => setExpBeneficiary(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                    Moyen de paiement *
-                  </label>
-                  <select
-                    className="input-field"
-                    value={expMethod}
-                    onChange={(e) => setExpMethod(e.target.value)}
-                  >
-                    <option value="CASH">Espèces (Caisse)</option>
-                    <option value="BANK_TRANSFER">Virement Bancaire</option>
-                    <option value="MOBILE_MONEY_MPESA">M-Pesa Marchand</option>
-                    <option value="CHECK">Chèque</option>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="exp-cat">Catégorie <span className="required">*</span></label>
+                  <select id="exp-cat" className="input-field" value={expCategory} onChange={(e) => setExpCategory(e.target.value)}>
+                    {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                    Compte Financier Débité
-                  </label>
-                  <select
-                    className="input-field"
-                    value={expAccountId}
-                    onChange={(e) => setExpAccountId(e.target.value)}
-                  >
-                    <option value="">Caisse Directe</option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name} ({formatCurrency(Number(a.balance), a.currency)})</option>
-                    ))}
-                  </select>
+
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="exp-amount">Montant (CDF) <span className="required">*</span></label>
+                    <input id="exp-amount" type="number" min="0.01" step="any" required className="input-field"
+                      placeholder="0" value={expAmount} onChange={(e) => setExpAmount(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="exp-method">Mode de paiement</label>
+                    <select id="exp-method" className="input-field" value={expMethod} onChange={(e) => setExpMethod(e.target.value)}>
+                      <option value="CASH">Espèces</option>
+                      <option value="BANK_TRANSFER">Virement bancaire</option>
+                      <option value="MOBILE_MONEY_MPESA">M-Pesa</option>
+                      <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
+                      <option value="CHECK">Chèque</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="exp-beneficiary">Bénéficiaire <span className="required">*</span></label>
+                  <input id="exp-beneficiary" type="text" required className="input-field"
+                    placeholder="Nom du fournisseur ou bénéficiaire" value={expBeneficiary}
+                    onChange={(e) => setExpBeneficiary(e.target.value)} />
+                </div>
+
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="exp-ref">Référence / Pièce justificative</label>
+                    <input id="exp-ref" type="text" className="input-field"
+                      placeholder="N° reçu, facture..." value={expRef}
+                      onChange={(e) => setExpRef(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="exp-account">Compte débité</label>
+                    <select id="exp-account" className="input-field" value={expAccountId} onChange={(e) => setExpAccountId(e.target.value)}>
+                      <option value="">— Sélectionner —</option>
+                      {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="exp-notes">Notes internes</label>
+                  <input id="exp-notes" type="text" className="input-field"
+                    placeholder="Commentaire facultatif..." value={expNotes}
+                    onChange={(e) => setExpNotes(e.target.value)} />
                 </div>
               </div>
-
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Motif / Justification
-                </label>
-                <textarea
-                  className="input-field"
-                  rows={2}
-                  placeholder="Justification de la dépense..."
-                  value={expNotes}
-                  onChange={(e) => setExpNotes(e.target.value)}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button type="button" onClick={() => setShowExpenseModal(false)} className="btn btn-secondary">
-                  Annuler
-                </button>
-                <button type="submit" disabled={submittingExpense} className="btn btn-primary">
-                  {submittingExpense ? 'Enregistrement...' : 'Valider la Dépense'}
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowExpenseModal(false)}>Annuler</button>
+                <button type="submit" disabled={submittingExpense} className="btn btn-danger">
+                  {submittingExpense ? (
+                    <><span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />Enregistrement...</>
+                  ) : <><ArrowDownCircle size={14} /> Enregistrer la dépense</>}
                 </button>
               </div>
             </form>
@@ -436,55 +523,57 @@ export const FinancesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Open Cash Session */}
+      {/* ── Modal Ouverture Caisse ── */}
       {showOpenModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ padding: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>
-                Ouvrir une Caisse
-              </h3>
-              <button onClick={() => setShowOpenModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-subtle)', cursor: 'pointer' }}>
-                <X size={20} />
+          <div className="modal">
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Unlock size={16} color="#16A34A" />
+                <span className="modal-title">Ouverture de caisse</span>
+              </div>
+              <button type="button" className="btn-close" onClick={() => setShowOpenModal(false)} aria-label="Fermer">
+                <X size={18} />
               </button>
             </div>
-
             <form onSubmit={handleOpenSession}>
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Caisse physique
-                </label>
-                <select
-                  className="input-field"
-                  value={selectedRegisterId}
-                  onChange={(e) => setSelectedRegisterId(e.target.value)}
-                >
-                  {cashRegisters.map((cr) => (
-                    <option key={cr.id} value={cr.id}>{cr.name} ({cr.location || 'Magasin'})</option>
-                  ))}
-                </select>
-              </div>
+              <div className="modal-body">
+                {openError && (
+                  <div className="alert alert-danger" style={{ marginBottom: '14px' }}>
+                    <AlertTriangle size={14} className="alert-icon" />
+                    <span>{openError}</span>
+                  </div>
+                )}
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Fond de roulement initial (CDF) *
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  required
-                  className="input-field"
-                  value={openBalance}
-                  onChange={(e) => setOpenBalance(e.target.value)}
-                />
+                <div className="form-group">
+                  <label className="form-label" htmlFor="open-register">Caisse <span className="required">*</span></label>
+                  <select id="open-register" className="input-field" value={selectedRegisterId}
+                    onChange={(e) => setSelectedRegisterId(e.target.value)}>
+                    {cashRegisters.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="open-balance">
+                    Fond de caisse initial (CDF) <span className="required">*</span>
+                  </label>
+                  <input id="open-balance" type="number" min="0" step="any" required className="input-field"
+                    placeholder="Montant compté en espèces" value={openBalance}
+                    onChange={(e) => setOpenBalance(e.target.value)} />
+                  <div className="form-hint">Saisissez le montant réel compté en espèces au moment de l'ouverture.</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="open-notes">Notes d'ouverture</label>
+                  <input id="open-notes" type="text" className="input-field"
+                    placeholder="Observation facultative..." value={openNotes}
+                    onChange={(e) => setOpenNotes(e.target.value)} />
+                </div>
               </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-                <button type="button" onClick={() => setShowOpenModal(false)} className="btn btn-secondary">
-                  Annuler
-                </button>
-                <button type="submit" disabled={submittingOpen} className="btn btn-primary">
-                  {submittingOpen ? 'Ouverture...' : 'Ouvrir la Caisse'}
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowOpenModal(false)}>Annuler</button>
+                <button type="submit" disabled={submittingOpen} className="btn btn-success">
+                  {submittingOpen ? (
+                    <><span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />Ouverture...</>
+                  ) : <><Unlock size={14} /> Ouvrir la caisse</>}
                 </button>
               </div>
             </form>
@@ -492,86 +581,174 @@ export const FinancesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Close Cash Session */}
+      {/* ── Modal Clôture Caisse ── */}
       {showCloseModal && currentSession && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ padding: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>
-                Clôture de Caisse & Rapprochement
-              </h3>
-              <button onClick={() => setShowCloseModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-subtle)', cursor: 'pointer' }}>
-                <X size={20} />
+          <div className="modal">
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Lock size={16} color="#DC2626" />
+                <span className="modal-title">Clôture de caisse</span>
+              </div>
+              <button type="button" className="btn-close" onClick={() => setShowCloseModal(false)} aria-label="Fermer">
+                <X size={18} />
               </button>
             </div>
-
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
-                <span>Fond Initial :</span>
-                <strong>{formatCurrency(Number(currentSession.openingBalance), currentSession.currency)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
-                <span>Encaissements Espèces :</span>
-                <strong style={{ color: '#34D399' }}>+{formatCurrency(totalSessionCashPayments, currentSession.currency)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.5rem', marginTop: '0.5rem', fontWeight: 800, color: 'var(--primary-light)' }}>
-                <span>Solde Théorique Attendu :</span>
-                <span>{formatCurrency(theoreticalSessionTotal, currentSession.currency)}</span>
-              </div>
-            </div>
-
             <form onSubmit={handleCloseSession}>
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Montant physique compté en caisse (CDF) *
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  required
-                  className="input-field"
-                  value={countedBalance}
-                  onChange={(e) => setCountedBalance(e.target.value)}
-                />
-              </div>
+              <div className="modal-body">
+                {closeError && (
+                  <div className="alert alert-danger" style={{ marginBottom: '14px' }}>
+                    <AlertTriangle size={14} className="alert-icon" />
+                    <span>{closeError}</span>
+                  </div>
+                )}
 
-              {/* Discrepancy indicator */}
-              <div style={{
-                background: diff === 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                border: diff === 0 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                padding: '0.75rem 1rem',
-                borderRadius: '8px',
-                marginBottom: '1rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                fontSize: '0.85rem',
-              }}>
-                <span>Écart de caisse :</span>
-                <strong style={{ color: diff === 0 ? '#34D399' : '#F87171' }}>
-                  {diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()} CDF {diff === 0 ? '(Conforme)' : '(Anomalie)'}
-                </strong>
-              </div>
+                {/* Résumé session (Clôture à l'aveugle pour le caissier) */}
+                {isManager ? (
+                  <div className="totals-box" style={{ marginBottom: '16px' }}>
+                    <div className="stat-line">
+                      <span className="stat-line-label">Fond d'ouverture</span>
+                      <span className="stat-line-value">{formatCurrency(Number(currentSession.openingBalance), Currency.CDF)}</span>
+                    </div>
+                    <div className="stat-line">
+                      <span className="stat-line-label">Encaissements espèces</span>
+                      <span className="stat-line-value text-success">+{formatCurrency(totalSessionCash, Currency.CDF)}</span>
+                    </div>
+                    <div className="stat-line" style={{ borderTop: '1px solid #E2E8F0', paddingTop: '8px', marginTop: '4px' }}>
+                      <span className="stat-line-label font-semibold">Total théorique attendu</span>
+                      <span className="stat-line-value font-bold">{formatCurrency(theoreticalTotal, Currency.CDF)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    background: '#F1F5F9',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '6px',
+                    padding: '10px 12px',
+                    fontSize: '0.8125rem',
+                    color: '#475569',
+                    marginBottom: '16px',
+                  }}>
+                    <strong>Procédure de clôture à l'aveugle :</strong> Comptez physiquement les espèces présentes dans le tiroir-caisse et saisissez le montant total.
+                  </div>
+                )}
 
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem', fontWeight: 600 }}>
-                  Commentaire / Justification de clôture
-                </label>
-                <textarea
-                  className="input-field"
-                  rows={2}
-                  placeholder="Justification en cas d'écart constaté..."
-                  value={closeNotes}
-                  onChange={(e) => setCloseNotes(e.target.value)}
-                />
-              </div>
+                {/* Option Billetage */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label className="form-label" style={{ margin: 0 }}>
+                    Solde réel compté (CDF) <span className="required">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setUseBilletage(!useBilletage)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#2563EB',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {useBilletage ? 'Saisie directe simple' : 'Aide au comptage (Billetage CDF)'}
+                  </button>
+                </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button type="button" onClick={() => setShowCloseModal(false)} className="btn btn-secondary">
-                  Annuler
-                </button>
+                {useBilletage ? (
+                  <div style={{
+                    background: '#F8FAFC',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: '6px',
+                    padding: '10px',
+                    marginBottom: '14px',
+                  }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: '8px' }}>
+                      Comptage des coupures en Francs Congolais (CDF) :
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                      {[
+                        { label: '20 000 CDF', val: b20k, set: setB20k, factor: 20000 },
+                        { label: '10 000 CDF', val: b10k, set: setB10k, factor: 10000 },
+                        { label: '5 000 CDF', val: b5k, set: setB5k, factor: 5000 },
+                        { label: '1 000 CDF', val: b1k, set: setB1k, factor: 1000 },
+                        { label: '500 CDF', val: b500, set: setB500, factor: 500 },
+                        { label: 'Monnaie / Pièces', val: bPieces, set: setBPieces, factor: 1 },
+                      ].map((item) => (
+                        <div key={item.label}>
+                          <label style={{ fontSize: '0.65rem', color: '#64748B', display: 'block' }}>{item.label}</label>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            className="input-field"
+                            style={{ padding: '4px 6px', fontSize: '0.8rem' }}
+                            value={item.val}
+                            onChange={(e) => {
+                              item.set(e.target.value);
+                              // Recalcul immédiat
+                              const v20 = item.factor === 20000 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b20k, 10) || 0);
+                              const v10 = item.factor === 10000 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b10k, 10) || 0);
+                              const v5 = item.factor === 5000 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b5k, 10) || 0);
+                              const v1 = item.factor === 1000 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b1k, 10) || 0);
+                              const v500 = item.factor === 500 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b500, 10) || 0);
+                              const vp = item.factor === 1 ? (parseFloat(e.target.value) || 0) : (parseFloat(bPieces) || 0);
+                              const total = v20 * 20000 + v10 * 10000 + v5 * 5000 + v1 * 1000 + v500 * 500 + vp;
+                              setCountedBalance(String(total));
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: '8px', textAlign: 'right', fontSize: '0.8rem', fontWeight: 700, color: '#0F172A' }}>
+                      Total compté : {((parseFloat(countedBalance) || 0)).toLocaleString('fr-FR')} CDF
+                    </div>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <input id="close-balance" type="number" min="0" step="any" required className="input-field"
+                      placeholder="Ex: 850000"
+                      value={countedBalance} onChange={(e) => setCountedBalance(e.target.value)} />
+                  </div>
+                )}
+
+                {/* Écart calculé en temps réel */}
+                {countedBalance !== '' && (
+                  <div style={{
+                    background: Math.abs(diff) < 1 ? '#F0FDF4' : diff < 0 ? '#FEF2F2' : '#FFFBEB',
+                    border: `1px solid ${Math.abs(diff) < 1 ? '#BBF7D0' : diff < 0 ? '#FECACA' : '#FDE68A'}`,
+                    borderRadius: '6px',
+                    padding: '10px 14px',
+                    marginBottom: '14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: '0.875rem',
+                  }}>
+                    <span style={{ color: '#4B5563' }}>Écart de caisse :</span>
+                    <strong style={{ color: Math.abs(diff) < 1 ? '#16A34A' : diff < 0 ? '#DC2626' : '#D97706' }}>
+                      {diff >= 0 ? '+' : ''}{formatCurrency(diff, Currency.CDF)}
+                      {Math.abs(diff) < 1 && ' — Caisse équilibrée'}
+                      {diff < -1 && ' — Manquant'}
+                      {diff > 1 && ' — Excédent'}
+                    </strong>
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="close-notes">
+                    Observations de clôture {diff < -1 && <span className="required">* (Obligatoire si manquant)</span>}
+                  </label>
+                  <input id="close-notes" type="text" className="input-field"
+                    required={diff < -1}
+                    placeholder="Raison d'un éventuel écart ou observation..." value={closeNotes}
+                    onChange={(e) => setCloseNotes(e.target.value)} />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowCloseModal(false)}>Annuler</button>
                 <button type="submit" disabled={submittingClose} className="btn btn-danger">
-                  {submittingClose ? 'Clôture en cours...' : 'Valider la Clôture'}
+                  {submittingClose ? (
+                    <><span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />Clôture en cours...</>
+                  ) : <><Lock size={14} /> Valider la clôture</>}
                 </button>
               </div>
             </form>

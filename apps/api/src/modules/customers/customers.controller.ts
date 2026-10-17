@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CustomersService } from './customers.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -38,5 +38,14 @@ export class CustomersController {
     @Body() body: any,
   ) {
     return this.customersService.update(orgId, id, body);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Supprimer un client' })
+  async remove(
+    @CurrentUser('organizationId') orgId: string,
+    @Param('id') id: string,
+  ) {
+    return this.customersService.delete(orgId, id);
   }
 }

@@ -10,22 +10,27 @@ import {
   CheckCircle,
   Receipt,
   AlertTriangle,
-  User,
-  CreditCard,
-  DollarSign
+  RefreshCw,
+  Barcode,
+  DollarSign,
+  Banknote,
+  CornerDownLeft,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 export const SalesPage: React.FC = () => {
   const { organization } = useAuth();
+  const { success, error: toastError } = useToast();
   const [activeTab, setActiveTab] = useState<'pos' | 'history'>('pos');
   const [products, setProducts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Cart state
+  // Panier
   const [cart, setCart] = useState<any[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
@@ -36,26 +41,32 @@ export const SalesPage: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Calculateur de monnaie bi-devise (CDF / USD)
+  const [amountPaidCDF, setAmountPaidCDF] = useState<string>('');
+  const [amountPaidUSD, setAmountPaidUSD] = useState<string>('');
+  const [changeCurrency, setChangeCurrency] = useState<'CDF' | 'USD'>('CDF');
+
   const exchangeRate = organization?.settings?.exchangeRateUsdToCdf || 2850;
   const taxRate = organization?.settings?.enableTax ? Number(organization.settings.taxRatePercent) : 0;
 
   const loadData = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const [prods, custs, sales] = await Promise.all([
         ApiClient.getProducts(),
         ApiClient.getCustomers(),
-        ApiClient.getSales(50),
+        ApiClient.getSales(100),
       ]);
       setProducts(prods);
       setCustomers(custs);
       setSalesHistory(sales);
       if (custs.length > 0) {
-        const comptant = custs.find((c) => c.code === 'CLI-COMPTANT');
+        const comptant = custs.find((c: any) => c.code === 'CLI-COMPTANT');
         setSelectedCustomerId(comptant ? comptant.id : custs[0].id);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setLoadError(err.message || 'Impossible de charger les données.');
     } finally {
       setLoading(false);
     }
@@ -65,11 +76,57 @@ export const SalesPage: React.FC = () => {
     loadData();
   }, []);
 
+  // Écouteur global pour lecteur code-barre / douchette USB (EAN-13, Code128)
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = Date.now();
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastKeyTime > 65) {
+        buffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.trim().length >= 3) {
+          const scanned = buffer.trim().toUpperCase();
+          const found = products.find(
+            (p) =>
+              (p.barcode && p.barcode.toUpperCase() === scanned) ||
+              (p.code && p.code.toUpperCase() === scanned)
+          );
+          if (found) {
+            addToCart(found);
+            success(`Article scanné : « ${found.name} »`);
+          } else {
+            toastError(`Code article non reconnu : ${scanned}`);
+          }
+          buffer = '';
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [products]);
+
   const addToCart = (product: any) => {
     setErrorMsg(null);
     setCart((prev) => {
       const existing = prev.find((item) => item.productId === product.id);
       if (existing) {
+        if (!product.isService && existing.quantity >= product.currentStock) {
+          setErrorMsg(`Stock insuffisant pour « ${product.name} ». Disponible : ${product.currentStock}`);
+          return prev;
+        }
         return prev.map((item) =>
           item.productId === product.id
             ? { ...item, quantity: item.quantity + 1 }
@@ -98,6 +155,10 @@ export const SalesPage: React.FC = () => {
         .map((item) => {
           if (item.productId === productId) {
             const newQty = item.quantity + delta;
+            if (!item.isService && newQty > item.currentStock) {
+              setErrorMsg(`Stock insuffisant. Maximum disponible : ${item.currentStock}`);
+              return item;
+            }
             return newQty > 0 ? { ...item, quantity: newQty } : null;
           }
           return item;
@@ -117,20 +178,25 @@ export const SalesPage: React.FC = () => {
     setCart((prev) => prev.filter((item) => item.productId !== productId));
   };
 
-  // Calculations
-  const subtotal = roundMoney(
-    cart.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
-  );
-  const totalDiscount = roundMoney(
-    cart.reduce((acc, item) => acc + (item.quantity * item.unitPrice * (item.discountPercent / 100)), 0)
-  );
+  const clearCart = () => {
+    if (cart.length > 0 && !window.confirm('Vider le panier ?')) return;
+    setCart([]);
+    setErrorMsg(null);
+  };
+
+  // Calculs (côté client uniquement pour affichage — le serveur recalcule)
+  const subtotal = roundMoney(cart.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0));
+  const totalDiscount = roundMoney(cart.reduce((acc, item) => acc + (item.quantity * item.unitPrice * (item.discountPercent / 100)), 0));
   const taxable = roundMoney(subtotal - totalDiscount);
   const taxAmount = roundMoney(taxable * (taxRate / 100));
   const netTotal = roundMoney(taxable + taxAmount);
-  const totalInUsd = roundMoney(netTotal / exchangeRate, 2);
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
+    if (!selectedCustomerId) {
+      setErrorMsg('Veuillez sélectionner un client.');
+      return;
+    }
     setErrorMsg(null);
     setSubmitting(true);
     try {
@@ -156,7 +222,7 @@ export const SalesPage: React.FC = () => {
       setPaymentReference('');
       loadData();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erreur lors de l’enregistrement de la vente');
+      setErrorMsg(err.message || 'Erreur lors de l\'enregistrement de la vente.');
     } finally {
       setSubmitting(false);
     }
@@ -169,389 +235,603 @@ export const SalesPage: React.FC = () => {
       (p.barcode && p.barcode.includes(search))
   );
 
+  const statusLabel: Record<string, string> = {
+    COMPLETED: 'Effectuée', PENDING: 'En attente', CANCELLED: 'Annulée', PARTIAL: 'Partielle',
+  };
+  const statusClass: Record<string, string> = {
+    COMPLETED: 'badge-success', PENDING: 'badge-warning', CANCELLED: 'badge-danger', PARTIAL: 'badge-info',
+  };
+
+  if (loading) {
+    return (
+      <div className="loading-state">
+        <div className="spinner" />
+        <span>Chargement...</span>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="alert alert-danger">
+        <AlertTriangle size={16} className="alert-icon" />
+        <div>
+          <div className="alert-title">Erreur de chargement</div>
+          <div className="alert-body">{loadError}</div>
+          <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: '8px' }} onClick={loadData}>
+            <RefreshCw size={12} /> Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ padding: '2rem' }}>
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.75rem' }}>
+    <div>
+      {/* Onglets */}
+      <div className="tabs">
         <button
+          type="button"
+          className={`tab-btn${activeTab === 'pos' ? ' active' : ''}`}
           onClick={() => setActiveTab('pos')}
-          className={`btn ${activeTab === 'pos' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
         >
-          <ShoppingCart size={16} />
-          <span>Caisse & Enregistrement Vente</span>
+          <ShoppingCart size={14} />
+          Enregistrement de vente
+          {cart.length > 0 && <span className="tab-count">{cart.reduce((a, i) => a + i.quantity, 0)}</span>}
         </button>
         <button
+          type="button"
+          className={`tab-btn${activeTab === 'history' ? ' active' : ''}`}
           onClick={() => setActiveTab('history')}
-          className={`btn ${activeTab === 'history' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
         >
-          <Receipt size={16} />
-          <span>Journal des Ventes ({salesHistory.length})</span>
+          <Receipt size={14} />
+          Journal des ventes
+          <span className="tab-count">{salesHistory.length}</span>
         </button>
       </div>
 
       {activeTab === 'pos' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '2rem' }}>
-          {/* Left: Product Selection */}
-          <div className="glass-panel" style={{ padding: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>
-                Catalogue des Articles
-              </h3>
-              <div style={{ position: 'relative', width: '280px' }}>
-                <input
-                  type="text"
-                  placeholder="Rechercher produit, code..."
-                  className="input-field"
-                  style={{ paddingLeft: '2.4rem' }}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-                <Search size={16} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)' }} />
-              </div>
-            </div>
-
-            {/* Product Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1rem', maxHeight: '600px', overflowY: 'auto' }}>
-              {filteredProducts.map((p) => {
-                const isOutOfStock = !p.isService && p.currentStock <= 0;
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() => !isOutOfStock && addToCart(p)}
-                    style={{
-                      background: 'rgba(15, 23, 42, 0.7)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: '12px',
-                      padding: '1.1rem',
-                      cursor: isOutOfStock ? 'not-allowed' : 'pointer',
-                      opacity: isOutOfStock ? 0.6 : 1,
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)' }}>
-                        {p.code}
-                      </span>
-                      <span className={`badge ${p.isService ? 'badge-info' : p.currentStock <= p.minStockLevel ? 'badge-danger' : 'badge-success'}`}>
-                        {p.isService ? 'Service' : `${p.currentStock} ${p.unit}`}
-                      </span>
-                    </div>
-                    <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#fff', marginBottom: '0.65rem', minHeight: '38px', lineHeight: 1.3 }}>
-                      {p.name}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div>
-                        <div style={{ fontWeight: 800, color: 'var(--primary-light)', fontSize: '1rem' }}>
-                          {formatCurrency(Number(p.salePrice), p.currency)}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)' }}>
-                          ≈ {(Number(p.salePrice) / exchangeRate).toFixed(2)} USD
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isOutOfStock}
-                        className="btn btn-secondary btn-sm"
-                        style={{ padding: '0.35rem' }}
-                      >
-                        <Plus size={16} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Right: Cart & Checkout */}
-          <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <ShoppingCart size={20} color="var(--primary-light)" />
-              <span>Panier de Vente</span>
-              <span className="badge badge-info" style={{ marginLeft: 'auto' }}>
-                {cart.reduce((acc, i) => acc + i.quantity, 0)} article(s)
-              </span>
-            </h3>
-
-            {errorMsg && (
-              <div style={{
-                background: 'var(--danger-bg)',
-                color: '#F87171',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                padding: '0.75rem',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                marginBottom: '1rem',
-              }}>
-                {errorMsg}
-              </div>
-            )}
-
-            {/* Cart Items */}
-            <div style={{ flex: 1, overflowY: 'auto', maxHeight: '280px', marginBottom: '1.25rem' }}>
-              {cart.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-subtle)' }}>
-                  <ShoppingCart size={40} style={{ margin: '0 auto 0.75rem', opacity: 0.3 }} />
-                  <div>Le panier est vide. Cliquez sur un article pour l’ajouter.</div>
-                </div>
-              ) : (
-                cart.map((item) => (
-                  <div
-                    key={item.productId}
-                    style={{
-                      background: 'rgba(15, 23, 42, 0.6)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: '10px',
-                      padding: '0.75rem 0.9rem',
-                      marginBottom: '0.65rem',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.4rem' }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#fff', flex: 1, paddingRight: '0.5rem' }}>
-                        {item.name}
-                      </div>
-                      <button
-                        onClick={() => removeFromCart(item.productId)}
-                        style={{ background: 'transparent', border: 'none', color: '#EF4444', cursor: 'pointer' }}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                        <button
-                          onClick={() => updateQuantity(item.productId, -1)}
-                          className="btn btn-secondary btn-sm"
-                          style={{ padding: '0.2rem 0.4rem' }}
-                        >
-                          <Minus size={12} />
-                        </button>
-                        <span style={{ fontWeight: 700, padding: '0 0.4rem', fontSize: '0.9rem' }}>
-                          {item.quantity}
-                        </span>
-                        <button
-                          onClick={() => updateQuantity(item.productId, 1)}
-                          className="btn btn-secondary btn-sm"
-                          style={{ padding: '0.2rem 0.4rem' }}
-                        >
-                          <Plus size={12} />
-                        </button>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          <span>Remise %:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={item.discountPercent}
-                            onChange={(e) => updateDiscount(item.productId, parseFloat(e.target.value) || 0)}
-                            style={{ width: '45px', padding: '2px 4px', background: '#0F172A', border: '1px solid var(--border-subtle)', color: '#fff', borderRadius: '4px', textAlign: 'center' }}
-                          />
-                        </div>
-                        <div style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem' }}>
-                          {formatCurrency(roundMoney(item.quantity * item.unitPrice * (1 - item.discountPercent / 100)), Currency.CDF)}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Customer & Payment Options */}
-            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '1rem', marginBottom: '1rem' }}>
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
-                  Client attribué
-                </label>
-                <select
-                  className="input-field"
-                  value={selectedCustomerId}
-                  onChange={(e) => setSelectedCustomerId(e.target.value)}
-                >
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.companyName ? `(${c.companyName})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
-                    Mode d'encaissement
-                  </label>
-                  <select
-                    className="input-field"
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                  >
-                    <option value="CASH">Espèces (Caisse)</option>
-                    <option value="BANK_TRANSFER">Virement Bancaire</option>
-                    <option value="MOBILE_MONEY_MPESA">M-Pesa Vodacom</option>
-                    <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
-                    <option value="CHECK">Chèque</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem', fontWeight: 600 }}>
-                    Réf. ou Pièce jointe
-                  </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '20px' }}>
+          {/* Catalogue produits */}
+          <div>
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Catalogue des articles</span>
+                <div className="input-with-icon" style={{ width: '260px' }}>
+                  <Search size={14} className="input-icon" />
                   <input
                     type="text"
-                    placeholder="Bordereau / TxID..."
+                    placeholder="Rechercher produit ou code..."
                     className="input-field"
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
                   />
                 </div>
               </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <input
-                  type="checkbox"
-                  id="immPay"
-                  checked={immediatePayment}
-                  onChange={(e) => setImmediatePayment(e.target.checked)}
-                />
-                <label htmlFor="immPay" style={{ fontSize: '0.8rem', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                  Paiement comptant immédiat (Émettre Reçu N° automatique)
-                </label>
+              <div className="card-body">
+                {filteredProducts.length === 0 ? (
+                  <div className="table-empty" style={{ minHeight: '120px' }}>
+                    <div className="table-empty-title">Aucun article trouvé</div>
+                    <div className="table-empty-sub">Modifiez votre recherche ou ajoutez des produits.</div>
+                  </div>
+                ) : (
+                  <div className="product-grid">
+                    {filteredProducts.map((p) => {
+                      const isOutOfStock = !p.isService && p.currentStock <= 0;
+                      return (
+                        <div
+                          key={p.id}
+                          className={`product-card${isOutOfStock ? ' out-of-stock' : ''}`}
+                          onClick={() => !isOutOfStock && addToCart(p)}
+                          role="button"
+                          tabIndex={isOutOfStock ? -1 : 0}
+                          onKeyDown={(e) => e.key === 'Enter' && !isOutOfStock && addToCart(p)}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                            <span className="product-card-code">{p.code}</span>
+                            <span className={`badge ${p.isService ? 'badge-info' : p.currentStock <= (p.minStockLevel || 0) ? 'badge-danger' : 'badge-success'}`}>
+                              {p.isService ? 'Service' : `${p.currentStock} ${p.unit || 'pcs'}`}
+                            </span>
+                          </div>
+                          <div className="product-card-name">{p.name}</div>
+                          <div className="product-card-footer">
+                            <div className="product-card-price">
+                              {formatCurrency(Number(p.salePrice), p.currency || Currency.CDF)}
+                            </div>
+                            <Plus size={14} color="#2563EB" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
+          </div>
 
-            {/* Totals Summary */}
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '10px', marginBottom: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-                <span>Sous-total Brut :</span>
-                <span>{formatCurrency(subtotal, Currency.CDF)}</span>
+          {/* Panier & encaissement */}
+          <div>
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">
+                  Panier
+                  {cart.length > 0 && (
+                    <span className="badge badge-primary" style={{ marginLeft: '8px' }}>
+                      {cart.reduce((acc, i) => acc + i.quantity, 0)} article(s)
+                    </span>
+                  )}
+                </span>
+                {cart.length > 0 && (
+                  <button type="button" className="btn btn-sm btn-danger-outline" onClick={clearCart}>
+                    <Trash2 size={12} /> Vider
+                  </button>
+                )}
               </div>
-              {totalDiscount > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#F87171', marginBottom: '0.25rem' }}>
-                  <span>Remise accordée :</span>
-                  <span>- {formatCurrency(totalDiscount, Currency.CDF)}</span>
+              <div className="card-body" style={{ paddingTop: '0' }}>
+                {errorMsg && (
+                  <div className="alert alert-danger" style={{ margin: '12px 0 8px' }}>
+                    <AlertTriangle size={14} className="alert-icon" />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
+
+                {/* Lignes panier */}
+                <div style={{ maxHeight: '260px', overflowY: 'auto', marginBottom: '12px' }}>
+                  {cart.length === 0 ? (
+                    <div className="table-empty" style={{ minHeight: '100px' }}>
+                      <ShoppingCart className="table-empty-icon" style={{ width: '32px', height: '32px' }} />
+                      <div className="table-empty-title">Panier vide</div>
+                      <div className="table-empty-sub">Cliquez sur un article pour l'ajouter.</div>
+                    </div>
+                  ) : (
+                    cart.map((item) => (
+                      <div
+                        key={item.productId}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          padding: '10px 0',
+                          borderBottom: '1px solid #F1F5F9',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#111827', flex: 1, paddingRight: '8px' }}>
+                            {item.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(item.productId)}
+                            style={{ background: 'transparent', border: 'none', color: '#DC2626', cursor: 'pointer', padding: '2px', display: 'flex' }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.productId, -1)}
+                              className="btn btn-sm btn-secondary btn-icon"
+                              style={{ padding: '2px 6px' }}
+                            >
+                              <Minus size={11} />
+                            </button>
+                            <span style={{ fontWeight: 700, minWidth: '24px', textAlign: 'center', fontSize: '0.875rem' }}>
+                              {item.quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.productId, 1)}
+                              className="btn btn-sm btn-secondary btn-icon"
+                              style={{ padding: '2px 6px' }}
+                            >
+                              <Plus size={11} />
+                            </button>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: '#6B7280' }}>
+                              <label style={{ marginBottom: 0 }}>Remise&nbsp;%</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={item.discountPercent}
+                                onChange={(e) => updateDiscount(item.productId, parseFloat(e.target.value) || 0)}
+                                style={{
+                                  width: '44px',
+                                  padding: '2px 4px',
+                                  border: '1px solid #E2E8F0',
+                                  borderRadius: '4px',
+                                  textAlign: 'center',
+                                  fontSize: '0.75rem',
+                                  fontFamily: 'inherit',
+                                }}
+                              />
+                            </div>
+                            <span style={{ fontWeight: 700, fontSize: '0.875rem', color: '#111827', fontFamily: "'JetBrains Mono', monospace" }}>
+                              {formatCurrency(roundMoney(item.quantity * item.unitPrice * (1 - item.discountPercent / 100)), Currency.CDF)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
-              )}
-              {taxRate > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-                  <span>TVA légale ({taxRate}%) :</span>
-                  <span>{formatCurrency(taxAmount, Currency.CDF)}</span>
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.25rem', fontWeight: 800, color: '#fff', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
-                <span>Net à Payer :</span>
-                <span style={{ color: 'var(--primary-light)' }}>{formatCurrency(netTotal, Currency.CDF)}</span>
-              </div>
-              <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-subtle)', marginTop: '0.2rem' }}>
-                Soit environ <strong>{totalInUsd} USD</strong>
+
+                {/* Client & Paiement */}
+                {cart.length > 0 && (
+                  <>
+                    <div className="divider" />
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="sale-customer">
+                        Client <span className="required">*</span>
+                      </label>
+                      <select
+                        id="sale-customer"
+                        className="input-field"
+                        value={selectedCustomerId}
+                        onChange={(e) => setSelectedCustomerId(e.target.value)}
+                      >
+                        {customers.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}{c.companyName ? ` — ${c.companyName}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="sale-payment">Mode de paiement</label>
+                        <select
+                          id="sale-payment"
+                          className="input-field"
+                          value={paymentMethod}
+                          onChange={(e) => setPaymentMethod(e.target.value)}
+                        >
+                          <option value="CASH">Espèces</option>
+                          <option value="BANK_TRANSFER">Virement bancaire</option>
+                          <option value="MOBILE_MONEY_MPESA">M-Pesa Vodacom</option>
+                          <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
+                          <option value="CHECK">Chèque</option>
+                          <option value="CREDIT">À crédit</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="sale-ref">Référence</label>
+                        <input
+                          id="sale-ref"
+                          type="text"
+                          className="input-field"
+                          placeholder="Bordereau / N° TxID"
+                          value={paymentReference}
+                          onChange={(e) => setPaymentReference(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                      <input
+                        type="checkbox"
+                        id="immPay"
+                        checked={immediatePayment}
+                        onChange={(e) => setImmediatePayment(e.target.checked)}
+                        style={{ width: '14px', height: '14px', cursor: 'pointer' }}
+                      />
+                      <label htmlFor="immPay" style={{ fontSize: '0.8125rem', color: '#4B5563', cursor: 'pointer' }}>
+                        Paiement immédiat (générer reçu automatique)
+                      </label>
+                    </div>
+
+                    {/* Totaux & Équivalence Bi-Devise */}
+                    <div className="totals-box" style={{ marginBottom: '14px' }}>
+                      <div className="totals-row">
+                        <span>Sous-total brut</span>
+                        <span>{formatCurrency(subtotal, Currency.CDF)}</span>
+                      </div>
+                      {totalDiscount > 0 && (
+                        <div className="totals-row">
+                          <span>Remise accordée</span>
+                          <span className="discount">− {formatCurrency(totalDiscount, Currency.CDF)}</span>
+                        </div>
+                      )}
+                      {taxRate > 0 && (
+                        <div className="totals-row">
+                          <span>TVA ({taxRate}%)</span>
+                          <span>{formatCurrency(taxAmount, Currency.CDF)}</span>
+                        </div>
+                      )}
+                      <div className="totals-row total-net" style={{ fontSize: '1.05rem', alignItems: 'baseline' }}>
+                        <span>Net à payer</span>
+                        <div style={{ textAlign: 'right' }}>
+                          <div>{formatCurrency(netTotal, Currency.CDF)}</div>
+                          <div style={{ fontSize: '0.8rem', color: '#6B7280', fontWeight: 'normal' }}>
+                            ≈ {(netTotal / exchangeRate).toFixed(2)} USD
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Calculateur de Monnaie Bi-Devise (Espèces) */}
+                    {paymentMethod === 'CASH' && (
+                      <div style={{
+                        background: '#F8FAFC',
+                        border: '1px solid #E2E8F0',
+                        borderRadius: '8px',
+                        padding: '12px',
+                        marginBottom: '14px',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <Banknote size={14} color="#16A34A" /> Encaissement Espèces
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAmountPaidCDF(String(netTotal));
+                              setAmountPaidUSD('0');
+                            }}
+                            className="btn btn-sm btn-secondary"
+                            style={{ padding: '2px 6px', fontSize: '0.7rem' }}
+                          >
+                            Montant Exact
+                          </button>
+                        </div>
+
+                        {/* Saisie CDF et USD simultanée */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                          <div>
+                            <label className="form-label" style={{ fontSize: '0.7rem' }}>Reçu en Francs (CDF)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="500"
+                              placeholder="0 CDF"
+                              className="input-field"
+                              value={amountPaidCDF}
+                              onChange={(e) => setAmountPaidCDF(e.target.value)}
+                            />
+                            {/* Boutons coupures rapides CDF */}
+                            <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                              {[10000, 20000, 50000].map((val) => (
+                                <button
+                                  key={val}
+                                  type="button"
+                                  onClick={() => setAmountPaidCDF(String((parseFloat(amountPaidCDF) || 0) + val))}
+                                  style={{
+                                    fontSize: '0.65rem',
+                                    padding: '2px 5px',
+                                    background: '#FFFFFF',
+                                    border: '1px solid #CBD5E1',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  +{val.toLocaleString('fr-FR')}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="form-label" style={{ fontSize: '0.7rem' }}>Reçu en Dollars (USD)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              placeholder="0 USD"
+                              className="input-field"
+                              value={amountPaidUSD}
+                              onChange={(e) => setAmountPaidUSD(e.target.value)}
+                            />
+                            {/* Boutons coupures rapides USD */}
+                            <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                              {[10, 20, 50, 100].map((val) => (
+                                <button
+                                  key={val}
+                                  type="button"
+                                  onClick={() => setAmountPaidUSD(String((parseFloat(amountPaidUSD) || 0) + val))}
+                                  style={{
+                                    fontSize: '0.65rem',
+                                    padding: '2px 5px',
+                                    background: '#FFFFFF',
+                                    border: '1px solid #CBD5E1',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  +{val}$
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Rendu dynamique de la monnaie */}
+                        {(() => {
+                          const pCDF = parseFloat(amountPaidCDF) || 0;
+                          const pUSD = parseFloat(amountPaidUSD) || 0;
+                          const totalPaidCDF = roundMoney(pCDF + (pUSD * exchangeRate));
+                          const diffCDF = roundMoney(totalPaidCDF - netTotal);
+
+                          if (totalPaidCDF === 0) return null;
+
+                          if (diffCDF >= 0) {
+                            return (
+                              <div style={{
+                                background: '#F0FDF4',
+                                border: '1px solid #86EFAC',
+                                borderRadius: '6px',
+                                padding: '8px 10px',
+                                textAlign: 'center',
+                              }}>
+                                <div style={{ fontSize: '0.75rem', color: '#166534', fontWeight: 600 }}>
+                                  MONNAIE À RENDRE AU CLIENT
+                                </div>
+                                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#15803D' }}>
+                                  {diffCDF.toLocaleString('fr-FR')} CDF
+                                </div>
+                                {diffCDF > 0 && exchangeRate > 0 && (
+                                  <div style={{ fontSize: '0.75rem', color: '#166534' }}>
+                                    (soit {(diffCDF / exchangeRate).toFixed(2)} USD)
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div style={{
+                                background: '#FEF2F2',
+                                border: '1px solid #FCA5A5',
+                                borderRadius: '6px',
+                                padding: '8px 10px',
+                                textAlign: 'center',
+                              }}>
+                                <div style={{ fontSize: '0.75rem', color: '#991B1B', fontWeight: 600 }}>
+                                  MONTANT INSUFFISANT (RESTE À PAYER)
+                                </div>
+                                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#DC2626' }}>
+                                  {Math.abs(diffCDF).toLocaleString('fr-FR')} CDF
+                                </div>
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleCheckout}
+                      disabled={cart.length === 0 || submitting}
+                      className="btn btn-success"
+                      style={{ width: '100%', padding: '12px', fontSize: '0.95rem', fontWeight: 700 }}
+                    >
+                      {submitting ? (
+                        <>
+                          <span className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
+                          Enregistrement en cours...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle size={18} />
+                          Valider & Imprimer le ticket
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
-
-            <button
-              onClick={handleCheckout}
-              disabled={cart.length === 0 || submitting}
-              className="btn btn-primary"
-              style={{ width: '100%', padding: '0.85rem', fontSize: '1rem' }}
-            >
-              {submitting ? 'Validation et écriture comptable...' : 'Valider & Encaisser la Vente'}
-            </button>
           </div>
         </div>
       ) : (
-        /* Sales History View */
-        <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', marginBottom: '1.25rem' }}>
-            Historique des Ventes Enregistrées
-          </h3>
+        /* Historique ventes */
+        <div className="table-wrapper">
+          <div className="table-toolbar">
+            <span className="table-toolbar-title">Journal des ventes</span>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={loadData}>
+              <RefreshCw size={13} /> Actualiser
+            </button>
+          </div>
           <div className="table-container">
-            <table className="custom-table">
-              <thead>
-                <tr>
-                  <th>N° Vente</th>
-                  <th>Date & Heure</th>
-                  <th>Client</th>
-                  <th>Vendeur</th>
-                  <th>Articles</th>
-                  <th>Montant Total</th>
-                  <th>Facture Liée</th>
-                  <th>Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {salesHistory.map((s) => (
-                  <tr key={s.id}>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--primary-light)' }}>
-                      {s.saleNumber}
-                    </td>
-                    <td>{new Date(s.createdAt).toLocaleString('fr-FR')}</td>
-                    <td>{s.customer?.name || 'Client Comptant'}</td>
-                    <td>{s.user?.firstName} {s.user?.lastName}</td>
-                    <td>{s.items?.length || 0} article(s)</td>
-                    <td style={{ fontWeight: 700, color: '#fff' }}>
-                      {formatCurrency(Number(s.total), s.currency)}
-                    </td>
-                    <td>
-                      {s.invoice ? (
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--accent-cyan)' }}>
-                          {s.invoice.invoiceNumber}
-                        </span>
-                      ) : '-'}
-                    </td>
-                    <td>
-                      <span className="badge badge-success">Effectuée</span>
-                    </td>
+            {salesHistory.length === 0 ? (
+              <div className="table-empty">
+                <Receipt className="table-empty-icon" />
+                <div className="table-empty-title">Aucune vente enregistrée</div>
+                <div className="table-empty-sub">Les ventes apparaîtront ici après enregistrement.</div>
+              </div>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>N° Vente</th>
+                    <th>Date & heure</th>
+                    <th>Client</th>
+                    <th>Vendeur</th>
+                    <th>Articles</th>
+                    <th className="col-amount">Montant total</th>
+                    <th>Facture</th>
+                    <th>Statut</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {salesHistory.map((s: any) => (
+                    <tr key={s.id}>
+                      <td className="col-mono">{s.saleNumber}</td>
+                      <td style={{ fontSize: '0.75rem' }}>{new Date(s.createdAt).toLocaleString('fr-FR')}</td>
+                      <td>{s.customer?.name || 'Client comptant'}</td>
+                      <td>{s.user?.firstName} {s.user?.lastName}</td>
+                      <td>{s.items?.length || 0}</td>
+                      <td className="col-amount">{formatCurrency(Number(s.total), s.currency)}</td>
+                      <td>
+                        {s.invoice ? (
+                          <span className="col-mono">{s.invoice.invoiceNumber}</span>
+                        ) : <span className="text-tertiary">—</span>}
+                      </td>
+                      <td>
+                        <span className={`badge ${statusClass[s.status] || 'badge-neutral'}`}>
+                          {statusLabel[s.status] || s.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}
 
-      {/* Success Modal */}
+      {/* Modal succès vente */}
       {successSale && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ padding: '2rem', textAlign: 'center' }}>
-            <div style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '50%',
-              background: 'rgba(16, 185, 129, 0.2)',
-              color: '#10B981',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '1rem',
-            }}>
-              <CheckCircle size={32} />
-            </div>
-            <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: '#fff', marginBottom: '0.5rem' }}>
-              Vente N° {successSale.sale.saleNumber} enregistrée avec succès !
-            </h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-              Les stocks ont été décrémentés, la facture <strong>{successSale.invoice?.invoiceNumber}</strong> a été générée et les écritures financières sont validées.
-            </p>
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '10px', textAlign: 'left', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                <span>Montant Net Encaissé :</span>
-                <strong style={{ color: '#34D399' }}>{formatCurrency(Number(successSale.sale.total), successSale.sale.currency)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Statut Facture :</span>
-                <span className="badge badge-success">{successSale.invoice?.status}</span>
+          <div className="modal">
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CheckCircle size={18} color="#16A34A" />
+                <span className="modal-title">Vente enregistrée avec succès</span>
               </div>
             </div>
-            <button
-              onClick={() => setSuccessSale(null)}
-              className="btn btn-primary"
-              style={{ width: '100%' }}
-            >
-              Fermer et continuer
-            </button>
+            <div className="modal-body">
+              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#111827', marginBottom: '4px' }}>
+                  Vente N° {successSale.sale?.saleNumber}
+                </div>
+                <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
+                  Stocks décrémentés · Facture générée · Écritures enregistrées
+                </div>
+              </div>
+              <div className="totals-box">
+                <div className="totals-row">
+                  <span>Montant encaissé</span>
+                  <span className="text-success font-semibold">{formatCurrency(Number(successSale.sale?.total), successSale.sale?.currency)}</span>
+                </div>
+                <div className="totals-row">
+                  <span>Facture</span>
+                  <span className="col-mono">{successSale.invoice?.invoiceNumber || '—'}</span>
+                </div>
+                <div className="totals-row">
+                  <span>Statut facture</span>
+                  <span className={`badge ${successSale.invoice?.status === 'PAID' ? 'badge-success' : 'badge-warning'}`}>
+                    {successSale.invoice?.status || '—'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                onClick={() => setSuccessSale(null)}
+                className="btn btn-primary"
+              >
+                Fermer et continuer
+              </button>
+            </div>
           </div>
         </div>
       )}

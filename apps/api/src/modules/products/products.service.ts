@@ -103,6 +103,19 @@ export class ProductsService {
     });
   }
 
+  async delete(organizationId: string, id: string) {
+    await this.findById(organizationId, id);
+    const saleItemsCount = await this.prisma.saleItem.count({ where: { productId: id } });
+    if (saleItemsCount > 0) {
+      return this.prisma.product.update({
+        where: { id },
+        data: { isActive: false },
+      });
+    }
+    await this.prisma.warehouseStock.deleteMany({ where: { productId: id } });
+    return this.prisma.product.delete({ where: { id } });
+  }
+
   async getLowStock(organizationId: string) {
     const products = await this.prisma.product.findMany({
       where: {

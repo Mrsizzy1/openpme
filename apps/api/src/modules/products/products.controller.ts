@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -64,5 +64,14 @@ export class ProductsController {
     @Body() body: any,
   ) {
     return this.productsService.update(orgId, id, body);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Supprimer un produit ou service' })
+  async remove(
+    @CurrentUser('organizationId') orgId: string,
+    @Param('id') id: string,
+  ) {
+    return this.productsService.delete(orgId, id);
   }
 }
