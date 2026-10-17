@@ -1,13 +1,16 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
+  LucideIcon,
   LayoutDashboard,
   ShoppingCart,
   Package,
   Receipt,
   Wallet,
   Users,
+  Truck,
   ShieldAlert,
+  UserCheck,
   Settings,
   LogOut,
   Building2,
@@ -19,21 +22,93 @@ interface SidebarProps {
   lowStockCount?: number;
 }
 
-const navItems = [
-  { to: '/', label: 'Tableau de bord', icon: LayoutDashboard, exact: true },
-  { to: '/sales', label: 'Ventes', icon: ShoppingCart },
-  { to: '/products', label: 'Produits & Stocks', icon: Package, badgeKey: 'stock' as const },
-  { to: '/invoices', label: 'Facturation', icon: Receipt },
-  { to: '/finances', label: 'Caisse & Dépenses', icon: Wallet },
-  { to: '/customers', label: 'Clients', icon: Users },
-  { to: '/anomalies', label: 'Anomalies', icon: ShieldAlert, badgeKey: 'anomaly' as const },
-  { to: '/settings', label: 'Paramètres', icon: Settings },
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  exact?: boolean;
+  badgeKey?: 'stock' | 'anomaly';
+  roles?: string[]; // Si vide, accessible à tous
+}
+
+const navItems: NavItem[] = [
+  {
+    to: '/',
+    label: 'Tableau de bord',
+    icon: LayoutDashboard,
+    exact: true,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'AUDITOR'],
+  },
+  {
+    to: '/sales',
+    label: 'Caisse & Ventes (POS)',
+    icon: ShoppingCart,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'CASHIER', 'SALES_REP'],
+  },
+  {
+    to: '/products',
+    label: 'Produits & Stocks',
+    icon: Package,
+    badgeKey: 'stock',
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'INVENTORY_MANAGER', 'ACCOUNTANT'],
+  },
+  {
+    to: '/invoices',
+    label: 'Facturation & Devis',
+    icon: Receipt,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER'],
+  },
+  {
+    to: '/finances',
+    label: 'Trésorerie & Dépenses',
+    icon: Wallet,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER'],
+  },
+  {
+    to: '/customers',
+    label: 'Clients',
+    icon: Users,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER', 'SALES_REP'],
+  },
+  {
+    to: '/suppliers',
+    label: 'Fournisseurs',
+    icon: Truck,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'INVENTORY_MANAGER', 'PURCHASER'],
+  },
+  {
+    to: '/anomalies',
+    label: 'Audit & Anomalies',
+    icon: ShieldAlert,
+    badgeKey: 'anomaly',
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'AUDITOR'],
+  },
+  {
+    to: '/users',
+    label: 'Équipe & Rôles',
+    icon: UserCheck,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER'],
+  },
+  {
+    to: '/settings',
+    label: 'Paramètres PME',
+    icon: Settings,
+    roles: ['SUPER_ADMIN', 'ORG_OWNER'],
+  },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ anomalyCount = 0, lowStockCount = 0 }) => {
   const { user, organization, logout } = useAuth();
 
-  const getBadge = (item: typeof navItems[0]) => {
+  const userRole = user?.role || 'CASHIER';
+
+  // Filtrage strict par RBAC
+  const visibleNavItems = navItems.filter((item) => {
+    if (!item.roles || item.roles.length === 0) return true;
+    return item.roles.includes(userRole);
+  });
+
+  const getBadge = (item: NavItem) => {
     if (item.badgeKey === 'anomaly' && anomalyCount > 0) return { count: anomalyCount, type: '' };
     if (item.badgeKey === 'stock' && lowStockCount > 0) return { count: lowStockCount, type: 'warning' };
     return null;
@@ -50,14 +125,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ anomalyCount = 0, lowStockCoun
         </div>
         <div style={{ overflow: 'hidden' }}>
           <div className="sidebar-brand-name">{organization?.name || 'Smart PME'}</div>
-          <div className="sidebar-org">{organization?.country || 'RDC'} · {organization?.settings?.primaryCurrency || 'CDF'}</div>
+          <div className="sidebar-org">
+            {organization?.country || 'RDC'} · {organization?.settings?.primaryCurrency || 'CDF'}
+          </div>
         </div>
       </div>
 
-      {/* Navigation */}
+      {/* Navigation filtrée par rôle */}
       <nav className="sidebar-nav">
-        <div className="sidebar-section-label">Menu</div>
-        {navItems.map((item) => {
+        <div className="sidebar-section-label">Menu Principal</div>
+        {visibleNavItems.map((item) => {
           const badge = getBadge(item);
           return (
             <NavLink
@@ -78,13 +155,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ anomalyCount = 0, lowStockCoun
         })}
       </nav>
 
-      {/* Pied : utilisateur */}
+      {/* Pied : utilisateur avec badge de rôle */}
       <div className="sidebar-footer">
         <div className="sidebar-user">
           <div className="sidebar-avatar">{initials}</div>
           <div className="sidebar-user-info">
-            <div className="sidebar-user-name">{user?.firstName} {user?.lastName}</div>
-            <div className="sidebar-user-role">{user?.role}</div>
+            <div className="sidebar-user-name">
+              {user?.firstName} {user?.lastName}
+            </div>
+            <div className="sidebar-user-role" style={{ color: '#38BDF8', fontWeight: 600 }}>
+              {userRole}
+            </div>
           </div>
           <button
             onClick={logout}

@@ -285,4 +285,56 @@ export class ApiClient {
       body: JSON.stringify(profile),
     });
   }
+
+  // Users & RBAC
+  static getUsers() {
+    return this.request<any[]>('/users');
+  }
+
+  static createUser(data: any) {
+    return this.request<any>('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static updateUser(id: string, data: any) {
+    return this.request<any>(`/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static deleteUser(id: string) {
+    return this.request<any>(`/users/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Suppliers
+  static getSuppliers(search?: string) {
+    const query = search ? `?search=${encodeURIComponent(search)}` : '';
+    return this.request<any[]>(`/suppliers${query}`);
+  }
+
+  static createSupplier(data: any) {
+    return this.request<any>('/suppliers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static updateSupplier(id: string, data: any) {
+    return this.request<any>(`/suppliers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static deleteSupplier(id: string) {
+    return this.request<any>(`/suppliers/${id}`, {
+      method: 'DELETE',
+    });
+  }
 }
+

@@ -4,6 +4,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { ProductsModule } from './modules/products/products.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { SuppliersModule } from './modules/suppliers/suppliers.module';
+import { UsersModule } from './modules/users/users.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -19,6 +21,8 @@ import { HealthModule } from './modules/health/health.module';
     OrganizationsModule,
     ProductsModule,
     CustomersModule,
+    SuppliersModule,
+    UsersModule,
     SalesModule,
     InvoicesModule,
     PaymentsModule,

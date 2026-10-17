@@ -13,6 +13,8 @@ import { ProductsPage } from './pages/ProductsPage';
 import { InvoicesPage } from './pages/InvoicesPage';
 import { FinancesPage } from './pages/FinancesPage';
 import { CustomersPage } from './pages/CustomersPage';
+import { SuppliersPage } from './pages/SuppliersPage';
+import { UsersPage } from './pages/UsersPage';
 import { AnomaliesPage } from './pages/AnomaliesPage';
 import { SettingsPage } from './pages/SettingsPage';
 
@@ -141,6 +143,30 @@ export const App: React.FC = () => {
                 subtitle="Fiches clients, encours, limites de crédit et historique"
               >
                 <CustomersPage />
+              </ProtectedLayout>
+            }
+          />
+
+          <Route
+            path="/suppliers"
+            element={
+              <ProtectedLayout
+                title="Fournisseurs"
+                subtitle="Gestion des fournisseurs, dettes d'achats et réceptions"
+              >
+                <SuppliersPage />
+              </ProtectedLayout>
+            }
+          />
+
+          <Route
+            path="/users"
+            element={
+              <ProtectedLayout
+                title="Gestion des Rôles & Équipe"
+                subtitle="Collaborateurs, attribution des permissions RBAC et accès"
+              >
+                <UsersPage />
               </ProtectedLayout>
             }
           />

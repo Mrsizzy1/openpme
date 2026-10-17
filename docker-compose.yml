@@ -1,0 +1,51 @@
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:17-alpine
+    container_name: openpme_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: smart_pme_finance
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # API Centrale NestJS
+  api:
+    build:
+      context: .
+      dockerfile: ./apps/api/Dockerfile
+    container_name: openpme_api
+    restart: always
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgrespassword@postgres:5432/smart_pme_finance?schema=public"
+      PORT: 3001
+      JWT_SECRET: "smart_pme_finance_super_secure_jwt_secret_key_prod_2026_xyz"
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Frontend Web React / Vite
+  web:
+    build:
+      context: .
+      dockerfile: ./apps/web/Dockerfile
+    container_name: openpme_web
+    restart: always
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
