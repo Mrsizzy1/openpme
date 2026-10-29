@@ -8,15 +8,25 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
 import { CreateProductDto, UpdateProductDto } from './products.dto';
 
+const PRODUCT_READ_ROLES = [
+  UserRole.SUPER_ADMIN,
+  UserRole.ORG_OWNER,
+  UserRole.MANAGER,
+  UserRole.INVENTORY_MANAGER,
+  UserRole.ACCOUNTANT,
+  UserRole.CASHIER,
+];
+const PRODUCT_MANAGEMENT_ROLES = PRODUCT_READ_ROLES.filter((role) => role !== UserRole.CASHIER);
+
 @ApiTags('Products & Inventory')
 @Controller('products')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.INVENTORY_MANAGER, UserRole.ACCOUNTANT)
 @ApiBearerAuth()
 export class ProductsController {
   constructor(private productsService: ProductsService) {}
 
   @Get()
+  @Roles(...PRODUCT_READ_ROLES)
   @ApiOperation({ summary: 'Lister les produits et services avec filtrage et recherche' })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'categoryId', required: false })
@@ -29,18 +39,21 @@ export class ProductsController {
   }
 
   @Get('low-stock')
+  @Roles(...PRODUCT_MANAGEMENT_ROLES)
   @ApiOperation({ summary: 'Lister les articles sous le seuil d’alerte de stock' })
   async getLowStock(@CurrentUser('organizationId') orgId: string) {
     return this.productsService.getLowStock(orgId);
   }
 
   @Get('categories')
+  @Roles(...PRODUCT_READ_ROLES)
   @ApiOperation({ summary: 'Lister les catégories de produits' })
   async listCategories(@CurrentUser('organizationId') orgId: string) {
     return this.productsService.listCategories(orgId);
   }
 
   @Post('categories')
+  @Roles(...PRODUCT_MANAGEMENT_ROLES)
   @ApiOperation({ summary: 'Créer une nouvelle catégorie' })
   async createCategory(
     @CurrentUser('organizationId') orgId: string,
@@ -50,18 +63,21 @@ export class ProductsController {
   }
 
   @Get(':id')
+  @Roles(...PRODUCT_READ_ROLES)
   @ApiOperation({ summary: 'Obtenir les détails d’un produit par ID' })
   async findById(@CurrentUser('organizationId') orgId: string, @Param('id') id: string) {
     return this.productsService.findById(orgId, id);
   }
 
   @Post()
+  @Roles(...PRODUCT_MANAGEMENT_ROLES)
   @ApiOperation({ summary: 'Créer un nouveau produit ou service' })
   async create(@CurrentUser('organizationId') orgId: string, @Body() body: CreateProductDto) {
     return this.productsService.create(orgId, body);
   }
 
   @Patch(':id')
+  @Roles(...PRODUCT_MANAGEMENT_ROLES)
   @ApiOperation({ summary: 'Modifier un produit ou service' })
   async update(
     @CurrentUser('organizationId') orgId: string,
@@ -72,6 +88,7 @@ export class ProductsController {
   }
 
   @Delete(':id')
+  @Roles(...PRODUCT_MANAGEMENT_ROLES)
   @ApiOperation({ summary: 'Supprimer un produit ou service' })
   async remove(
     @CurrentUser('organizationId') orgId: string,
