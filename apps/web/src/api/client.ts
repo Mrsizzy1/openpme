@@ -1,4 +1,9 @@
-const getApiBaseUrl = () => `${window.location.protocol}//${window.location.hostname}:3001/api/v1`;
+const getApiBaseUrl = () => (
+  import.meta.env.VITE_API_BASE_URL
+  || (import.meta.env.DEV
+    ? '/api/v1'
+    : `${window.location.protocol}//${window.location.hostname}:3001/api/v1`)
+).replace(/\/+$/, '');
 
 export class ApiClientError extends Error {
   constructor(message: string, readonly statusCode: number) {
@@ -10,6 +15,17 @@ export class ApiClientError extends Error {
 export class ApiClient {
   private static refreshPromise: Promise<any> | null = null;
   private static accessToken: string | null = null;
+
+  private static async fetchApi(url: string, options: RequestInit): Promise<Response> {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new Error('Serveur API inaccessible. Vérifiez que l’API est démarrée et que la base de données est accessible.');
+      }
+      throw error;
+    }
+  }
 
   private static async parseResponse(response: Response): Promise<any> {
     const body = await response.text();
@@ -64,7 +80,7 @@ export class ApiClient {
 
   private static async refreshSession() {
     if (!this.refreshPromise) {
-      this.refreshPromise = fetch(`${getApiBaseUrl()}/auth/refresh`, {
+      this.refreshPromise = this.fetchApi(`${getApiBaseUrl()}/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
       })
@@ -114,7 +130,7 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    return fetch(`${getApiBaseUrl()}${endpoint}`, {
+    return this.fetchApi(`${getApiBaseUrl()}${endpoint}`, {
       ...options,
       headers,
       credentials: 'include',
@@ -489,9 +505,17 @@ export class ApiClient {
     });
   }
 
-  static unlockTerminal(id: string) {
+  static unlockTerminal(id: string, reason: string) {
     return this.request<any>(`/remote-control/terminals/${id}/unlock`, {
       method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  static revokeTerminal(id: string, reason: string) {
+    return this.request<any>(`/remote-control/terminals/${id}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     });
   }
 
@@ -499,18 +523,6 @@ export class ApiClient {
     return this.request<any>(`/remote-control/terminals/${id}/kill`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
-    });
-  }
-
-  static sendHeartbeat(data: {
-    terminalId: string;
-    organizationId: string;
-    userId?: string;
-    clientType?: 'DESKTOP_PYQT' | 'WEB_POS' | 'BROWSER';
-  }) {
-    return this.request<any>('/remote-control/heartbeat', {
-      method: 'POST',
-      body: JSON.stringify(data),
     });
   }
 
