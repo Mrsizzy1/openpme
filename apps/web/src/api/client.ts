@@ -172,6 +172,40 @@ export class ApiClient {
     return this.request<any>(`/dashboard/metrics${query}`);
   }
 
+  static async downloadBankDossier(months: 6 | 12): Promise<Blob> {
+    const endpoint = `/reports/bank-dossier?months=${months}`;
+    const options: RequestInit = { method: 'GET', headers: { Accept: 'application/pdf' } };
+    let response = await this.send(endpoint, options, this.getToken());
+
+    if (response.status === 401) {
+      try {
+        await this.refreshSession();
+        response = await this.send(endpoint, options, this.getToken());
+      } catch {
+        this.clearAuth();
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+        throw new Error('Session expirée. Veuillez vous reconnecter.');
+      }
+
+      if (response.status === 401) {
+        this.clearAuth();
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+        throw new Error('Session expirée. Veuillez vous reconnecter.');
+      }
+    }
+
+    if (!response.ok) {
+      const error = await this.parseResponse(response);
+      throw new Error(error?.message || `Le téléchargement a échoué (HTTP ${response.status}).`);
+    }
+
+    return response.blob();
+  }
+
   // Products
   static getProducts(search?: string, categoryId?: string) {
     const params = new URLSearchParams();

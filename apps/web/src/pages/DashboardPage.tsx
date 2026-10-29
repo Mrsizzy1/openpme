@@ -14,6 +14,7 @@ import {
   ExternalLink,
   RefreshCw,
   Monitor,
+  FileDown,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -43,6 +44,9 @@ export const DashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [displayCurrency, setDisplayCurrency] = useState<Currency | undefined>();
+  const [dossierMonths, setDossierMonths] = useState<6 | 12>(12);
+  const [dossierLoading, setDossierLoading] = useState(false);
+  const [dossierError, setDossierError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const loadMetrics = async (currency = displayCurrency) => {
@@ -56,6 +60,26 @@ export const DashboardPage: React.FC = () => {
       setError(err.message || 'Impossible de charger les indicateurs.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadBankDossier = async () => {
+    try {
+      setDossierLoading(true);
+      setDossierError(null);
+      const pdf = await ApiClient.downloadBankDossier(dossierMonths);
+      const url = window.URL.createObjectURL(pdf);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `dossier-banque-${dossierMonths}-mois.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+    } catch (err: unknown) {
+      setDossierError(err instanceof Error ? err.message : 'Impossible de générer le dossier bancaire.');
+    } finally {
+      setDossierLoading(false);
     }
   };
 
@@ -98,7 +122,29 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem' }}>
+            Période du dossier
+            <select
+              className="input-field"
+              style={{ width: '110px' }}
+              value={dossierMonths}
+              onChange={(event) => setDossierMonths(event.target.value === '6' ? 6 : 12)}
+            >
+              <option value={12}>12 mois</option>
+              <option value={6}>6 mois</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={downloadBankDossier}
+            disabled={dossierLoading}
+          >
+            <FileDown size={15} /> {dossierLoading ? 'Génération...' : 'Dossier Banque'}
+          </button>
+        </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem' }}>
           Devise d’affichage
           <select
@@ -116,6 +162,12 @@ export const DashboardPage: React.FC = () => {
           </select>
         </label>
       </div>
+      {dossierError && (
+        <div className="alert alert-danger" role="alert" style={{ marginBottom: '14px' }}>
+          <AlertTriangle size={16} className="alert-icon" />
+          <div className="alert-body">{dossierError}</div>
+        </div>
+      )}
       {/* Bandeau anomalies actives */}
       {metrics.activeAnomaliesCount > 0 && (
         <div className="alert alert-warning" style={{ marginBottom: '20px' }}>

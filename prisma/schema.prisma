@@ -411,6 +411,7 @@ model SaleItem {
   product         Product @relation(fields: [productId], references: [id])
   quantity        Int
   unitPrice       Decimal @db.Decimal(15, 2)
+  unitCost        Decimal? @db.Decimal(15, 2)
   discountPercent Decimal @default(0.00) @db.Decimal(5, 2)
   taxRatePercent  Decimal @default(0.00) @db.Decimal(5, 2)
   total           Decimal @db.Decimal(15, 2)

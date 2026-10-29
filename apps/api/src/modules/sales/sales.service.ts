@@ -23,6 +23,17 @@ import {
 } from '../../common/money/decimal-money';
 import { CreateSaleDto } from './sales.dto';
 
+export function snapshotSaleUnitCost(
+  purchasePrice: Prisma.Decimal,
+  productCurrency: Currency,
+  saleCurrency: Currency,
+  exchangeRateUsdToCdf: Prisma.Decimal,
+  isService: boolean,
+): Prisma.Decimal | null {
+  if (isService || purchasePrice.lte(0)) return null;
+  return convertAmount(purchasePrice, productCurrency, saleCurrency, exchangeRateUsdToCdf);
+}
+
 @Injectable()
 export class SalesService {
   constructor(private prisma: PrismaService) {}
@@ -123,7 +134,15 @@ export class SalesService {
         discountAmount: Prisma.Decimal;
         taxAmount: Prisma.Decimal;
         total: Prisma.Decimal;
-        product: { id: string; name: string; isService: boolean; currentStock: number };
+        unitCost: Prisma.Decimal | null;
+        product: {
+          id: string;
+          name: string;
+          isService: boolean;
+          currentStock: number;
+          purchasePrice: Prisma.Decimal;
+          currency: Currency;
+        };
       }> = [];
 
       for (const item of data.items) {
@@ -132,6 +151,7 @@ export class SalesService {
           select: {
             id: true,
             name: true,
+            purchasePrice: true,
             salePrice: true,
             currency: true,
             isService: true,
@@ -141,6 +161,13 @@ export class SalesService {
         if (!product) throw new NotFoundException(`Produit ID ${item.productId} introuvable.`);
 
         const unitPrice = convertAmount(product.salePrice, product.currency, currency, exchangeRate);
+        const unitCost = snapshotSaleUnitCost(
+          product.purchasePrice,
+          product.currency,
+          currency,
+          exchangeRate,
+          product.isService,
+        );
         const discountPercent = decimalAmount(item.discountPercent ?? 0, 'remise');
         if (discountPercent.isNegative() || discountPercent.gt(100)) {
           throw new BadRequestException('La remise doit être comprise entre 0 et 100 %.');
@@ -168,6 +195,7 @@ export class SalesService {
           discountAmount,
           taxAmount,
           total,
+          unitCost,
           product,
         });
       }
@@ -366,6 +394,7 @@ export class SalesService {
               productId: item.productId,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
+              unitCost: item.unitCost,
               discountPercent: item.discountPercent,
               taxRatePercent: item.taxRatePercent,
               total: item.total,

@@ -45,6 +45,17 @@ Les prix produits ont une devise de référence (CDF ou USD). Le taux USD/CDF es
 
 Une vente peut être facturée en CDF ou USD et réglée en espèces dans l’une ou les deux devises. Pour chaque devise remise en espèces, le caissier doit avoir sa propre session ouverte; un rendu de monnaie est enregistré comme sortie de la session CDF. Les dépenses payées en espèces sont également enregistrées comme sorties de la session correspondante. Le tableau de bord permet de choisir la devise d’affichage.
 
+### Dossier Banque
+
+Depuis le tableau de bord, un gérant, propriétaire, comptable ou auditeur peut télécharger un dossier PDF couvrant les 6 ou 12 derniers mois. Le document présente séparément les montants CDF et USD, les ventes hors TVA, les marges brutes disponibles, les encaissements, les dépenses, le flux net, les écarts de caisse et la régularité des paiements. Il porte le logo bouclier-coche Smart PME Finance et la mention « généré par Smart PME Finance ».
+
+Les marges utilisent le coût d’achat conservé lors de chaque vente. Les ventes antérieures à la migration ou les prestations sans coût enregistré restent incluses dans les ventes, mais leur marge est indiquée comme indisponible plutôt que devinée. Après mise à jour, appliquez la migration avant d’utiliser le rapport :
+
+```powershell
+npm run prisma:generate
+npm run prisma:migrate
+```
+
 Après récupération des changements, appliquez les migrations avant de redémarrer l’API :
 
 ```powershell
