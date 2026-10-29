@@ -1,76 +1,74 @@
-# 💼 Smart PME Finance
+# Smart PME Finance
 
-> **Plateforme intégrée de gestion commerciale et financière des PME avec détection intelligente des anomalies et supervision à distance**
-> *Projet et réalisation pour mémoire de Licence / Bac 3 en Sciences Informatiques*
+Plateforme de gestion commerciale et financière des PME en RDC : ventes, facturation, stocks, trésorerie, supervision et détection d'anomalies.
 
----
+## Architecture
 
-## 🌟 Présentation
+- **API** : NestJS 11, TypeScript, Prisma, PostgreSQL, JWT, Swagger et contrôle RBAC.
+- **Web** : React 18, TypeScript, Vite et `@smart-pme/shared`.
+- **Desktop Windows** : client natif Python/PyQt6 + QtWebEngine qui affiche l'application web. Le dépôt ne contient pas d'application Electron.
+- **Monorepo** : packages npm workspaces.
 
-**Smart PME Finance** est une solution logicielle d'entreprise moderne et complète, conçue sur mesure pour les réalités opérationnelles des PME, notamment en République démocratique du Congo (RDC).
+## Démarrage local
 
-Elle unifie au sein d'une même architecture :
-1. **Une API Centrale NestJS** versionnée (`/api/v1`) avec documentation Swagger interactive (`/api/docs`).
-2. **Une base relationnelle PostgreSQL** gérée par Prisma ORM avec isolation stricte multi-entreprises.
-3. **Une application Web moderne React + Vite** avec design system midnight blue/slate et glassmorphism.
-4. **Une application Windows Desktop Electron** réutilisant la même logique métier et offrant l'impression locale.
-5. **Un moteur intelligent de détection des anomalies de gestion** (remises anormales, écarts de caisse, ruptures de stocks, dépenses excessives).
+### 1. Configurer l'environnement
 
----
+Copiez `.env.example` vers `.env`, configurez PostgreSQL et définissez un secret JWT aléatoire d'au moins 32 caractères. Ne partagez jamais `.env`.
 
-## 🛠️ Stack Technologique
+Sous PowerShell :
 
-- **Backend :** Node.js v24, NestJS 11, TypeScript 5, Prisma ORM 6, JWT, Class-Validator, Swagger OpenAPI.
-- **Base de données :** PostgreSQL 17 (service local `postgresql-x64-17` port 5432).
-- **Frontend Web :** React 18, TypeScript, Vite 6, Lucide Icons, Vanilla CSS Design System.
-- **Desktop Windows :** Electron 33, preload context bridge sécurisé.
-- **Packages partagés :** `@smart-pme/shared` (calculs monétaires, DTOs, énumérations).
-
----
-
-## 🚀 Démarrage Rapide
-
-### 1. Variables d'environnement
-Le fichier `.env` est configuré à la racine :
-```env
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/smart_pme_finance?schema=public"
-PORT=3001
-JWT_SECRET=smart_pme_finance_super_secure_jwt_secret_key_prod_2026_xyz
+```powershell
+Copy-Item .env.example .env
+$secret = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
+(Get-Content .env) -replace '^JWT_SECRET=.*$', "JWT_SECRET=$secret" | Set-Content .env
 ```
 
-### 2. Déploiement de la base & Seed
-```bash
-npm run prisma:push
+Le compte PostgreSQL et la base indiqués par `DATABASE_URL` doivent déjà exister. Pour Docker Compose, renseignez aussi les variables `POSTGRES_*` et utilisez un secret JWT différent.
+
+### 2. Installer et initialiser
+
+```powershell
+npm ci
+npm run build:shared
+npm run prisma:generate
+npm run prisma:migrate
 npm run prisma:seed
 ```
 
+Le seed contient des comptes de démonstration **réservés au développement local**; il refuse l'environnement production. Les mots de passe sont générés aléatoirement et affichés dans le terminal au moment du seed. Aucun mot de passe de démonstration n'est publié dans la documentation.
+
+Pour une base existante déjà créée avant l'ajout des migrations, sauvegardez-la, marquez le baseline déjà présent comme appliqué (`npx prisma migrate resolve --applied 20261029000000_init`), puis lancez `npm run prisma:migrate` pour appliquer la migration de suivi de session. Ne marquez le baseline qu'après avoir vérifié que la base correspond au schéma existant.
+
 ### 3. Démarrer les services
-- **API NestJS :**
-  ```bash
-  npm run dev:api
-  ```
-  Accessible sur `http://localhost:3001/api/v1` (Swagger sur `http://localhost:3001/api/docs`).
 
-- **Application Web React :**
-  ```bash
-  npm run dev:web
-  ```
-  Accessible sur `http://localhost:5173`.
+Dans des terminaux distincts :
 
----
+```powershell
+npm run dev:api
+npm run dev:web
+```
 
-## 👥 Comptes de Démonstration (RDC)
+- Web : <http://localhost:5173>
+- API : <http://localhost:3001/api/v1>
+- Swagger : <http://localhost:3001/api/docs>
 
-| Rôle | Email | Mot de passe |
-|---|---|---|
-| **Administrateur / Propriétaire** | `admin@smartpme.cd` | `Admin@2026!` |
-| **Gérant / Manager** | `manager@smartpme.cd` | `Manager@2026!` |
-| **Comptable** | `comptable@smartpme.cd` | `Comptable@2026!` |
-| **Caissier** | `caissier@smartpme.cd` | `Caissier@2026!` |
+Le client desktop Windows est lancé avec `npm run dev:desktop` ou `LANCER_DESKTOP.bat`. Il nécessite Python et les dépendances PyQt6/QtWebEngine.
 
----
+## Authentification et sessions
 
-## 📚 Documentation Académique
+Les mots de passe sont hachés avec bcrypt; les anciens hachages de développement sont mis à niveau au prochain login réussi. Les jetons d'accès expirent après 15 minutes et restent en mémoire côté web. Un jeton de renouvellement rotatif est placé dans un cookie HttpOnly et la session est suivie côté serveur. Les managers voient l'état « en ligne » et le nombre de sessions actives dans la gestion d'équipe.
 
-Le mémoire technique complet est disponible sous :
-👉 [`docs/MEMOIRE_SMART_PME_FINANCE.md`](docs/MEMOIRE_SMART_PME_FINANCE.md)
+Les comptes propriétaire et super-admin sont protégés. Un mot de passe existant n'est jamais consultable; un manager peut générer un mot de passe temporaire aléatoire affiché une seule fois.
+
+## Validation
+
+```powershell
+npm run build:shared
+npm run build:api
+npm run build:web
+npm test
+```
+
+## Documentation académique
+
+Le mémoire se trouve dans [`docs/MEMOIRE_SMART_PME_FINANCE.md`](docs/MEMOIRE_SMART_PME_FINANCE.md).

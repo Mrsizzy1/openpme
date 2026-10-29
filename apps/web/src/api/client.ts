@@ -1,17 +1,26 @@
-const API_BASE_URL = 'http://localhost:3001/api/v1';
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:3001/api/v1`;
 
 export class ApiClient {
+  private static refreshPromise: Promise<any> | null = null;
+  private static accessToken: string | null = null;
+
   private static getToken(): string | null {
-    return localStorage.getItem('smart_pme_token');
+    return this.accessToken;
+  }
+
+  static getAccessToken(): string | null {
+    return this.accessToken;
   }
 
   static setAuth(token: string, user: any, org: any) {
-    localStorage.setItem('smart_pme_token', token);
+    this.accessToken = token || null;
+    localStorage.removeItem('smart_pme_token');
     localStorage.setItem('smart_pme_user', JSON.stringify(user));
     localStorage.setItem('smart_pme_org', JSON.stringify(org));
   }
 
   static clearAuth() {
+    this.accessToken = null;
     localStorage.removeItem('smart_pme_token');
     localStorage.removeItem('smart_pme_user');
     localStorage.removeItem('smart_pme_org');
@@ -35,8 +44,46 @@ export class ApiClient {
     }
   }
 
-  private static async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const token = this.getToken();
+  private static async refreshSession() {
+    if (!this.refreshPromise) {
+      this.refreshPromise = fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+        .then(async (response) => {
+          const json = await response.json();
+          if (!response.ok) {
+            throw new Error(json.message || 'Session expirée');
+          }
+          this.setAuth(json.accessToken, json.user, json.organization);
+          return json;
+        })
+        .finally(() => {
+          this.refreshPromise = null;
+        });
+    }
+
+    return this.refreshPromise;
+  }
+
+  static async restoreSession() {
+    localStorage.removeItem('smart_pme_token');
+    if (this.getToken()) {
+      const profile = await this.request<any>('/auth/me');
+      const token = this.getToken();
+      if (token) this.setAuth(token, profile.user, profile.organization);
+      return profile;
+    }
+
+    const refreshed = await this.refreshSession();
+    return { user: refreshed.user, organization: refreshed.organization };
+  }
+
+  static async logout() {
+    await this.request('/auth/logout', { method: 'POST' });
+  }
+
+  private static async send<T>(endpoint: string, options: RequestInit, token: string | null) {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>),
@@ -46,17 +93,35 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    return fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers,
+      credentials: 'include',
     });
+  }
 
-    if (response.status === 401) {
-      this.clearAuth();
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login';
+  private static async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    let response = await this.send(endpoint, options, this.getToken());
+    const usesAuthEndpoint = ['/auth/login', '/auth/refresh', '/auth/logout'].includes(endpoint);
+    if (response.status === 401 && !usesAuthEndpoint) {
+      try {
+        await this.refreshSession();
+        response = await this.send(endpoint, options, this.getToken());
+      } catch {
+        this.clearAuth();
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+        throw new Error('Session expirée. Veuillez vous reconnecter.');
       }
-      throw new Error('Session expirée');
+
+      if (response.status === 401) {
+        this.clearAuth();
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+        throw new Error('Session expirée. Veuillez vous reconnecter.');
+      }
     }
 
     const json = await response.json();
@@ -305,6 +370,13 @@ export class ApiClient {
     });
   }
 
+  static resetUserPassword(id: string) {
+    return this.request<{ id: string; email: string; temporaryPassword: string }>(
+      `/users/${id}/reset-password`,
+      { method: 'POST' },
+    );
+  }
+
   static deleteUser(id: string) {
     return this.request<any>(`/users/${id}`, {
       method: 'DELETE',
@@ -433,6 +505,3 @@ export class ApiClient {
     });
   }
 }
-
-
-

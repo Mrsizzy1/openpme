@@ -228,10 +228,12 @@ model Session {
   userAgent    String?
   ipAddress    String?
   expiresAt    DateTime
+  lastSeenAt   DateTime  @default(now())
   revoked      Boolean   @default(false)
   createdAt    DateTime  @default(now())
 
-  @@index([userId])
+  @@index([userId, revoked, expiresAt])
+  @@index([lastSeenAt])
   @@map("sessions")
 }
 

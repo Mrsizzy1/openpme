@@ -15,6 +15,7 @@ export class OrganizationsController {
   constructor(private orgsService: OrganizationsService) {}
 
   @Get('profile')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER)
   @ApiOperation({ summary: 'Obtenir les données de l’entreprise courante' })
   async getProfile(@CurrentUser('organizationId') orgId: string) {
     return this.orgsService.getProfile(orgId);
@@ -28,7 +29,7 @@ export class OrganizationsController {
   }
 
   @Put('settings')
-  @Roles(UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER)
   @ApiOperation({ summary: 'Mettre à jour les paramètres de l’entreprise (taxes, devises, alertes)' })
   async updateSettings(@CurrentUser('organizationId') orgId: string, @Body() body: any) {
     return this.orgsService.updateSettings(orgId, body);

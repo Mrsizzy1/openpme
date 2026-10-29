@@ -774,10 +774,10 @@ Smart PME Finance repose sur une architecture découplée assurant la séparatio
 ### 4.2.1. Protocole d'authentification par jeton JWT
 Lorsqu'un utilisateur initie une connexion :
 1. Le client transmet les identifiants via `POST /api/v1/auth/login` ;
-2. Le service backend extrait l'utilisateur, vérifie son statut `active = true` et compare le hachage du mot de passe avec l'empreinte stockée via `bcrypt.compare()` ;
-3. Si la validation réussit, le serveur génère un jeton signé cryptographiquement (**JWT**) contenant le `userId`, l'`organizationId` et le `role` avec une durée de validité de 24 heures ;
-4. Chaque requête subséquente inclut l'en-tête HTTP : `Authorization: Bearer <token>` ;
-5. Un garde NestJS (`JwtAuthGuard`) intercepte la requête, valide la signature et injecte l'objet utilisateur dans le contexte d'exécution.
+2. Le service vérifie le compte actif et le mot de passe avec bcrypt; les anciens hachages SHA-256 sont mis à niveau au prochain succès de connexion ;
+3. Le serveur émet un jeton d'accès JWT de courte durée (15 minutes) et un jeton opaque de renouvellement stocké sous forme hachée et transmis dans un cookie HttpOnly ;
+4. Chaque requête authentifiée inclut le jeton d'accès dans l'en-tête `Authorization: Bearer <jeton>` ; le renouvellement fait tourner le cookie de session ;
+5. Le garde NestJS (`JwtAuthGuard`) valide la signature, l'expiration et l'état de la session en base avant d'injecter le contexte utilisateur.
 
 ### 4.2.2. Matrice des droits d'accès basée sur les rôles (RBAC)
 
@@ -787,7 +787,7 @@ La granularité des autorisations est synthétisée ci-dessous :
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **SUPER_ADMIN** | Consultation | Consultation | Consultation | Non | Consultation | Total | Total |
 | **ORG_OWNER** | Total | Total | Total | Validation | Approbation | Résolution | Total |
-| **MANAGER** | Total | Total | Total | Validation | Enregistrement | Consultation | Consultation |
+| **MANAGER** | Total | Total | Total | Validation | Enregistrement | Gestion | Gestion |
 | **ACCOUNTANT** | Consultation | Consultation | Total | Validation | Total | Consultation | Non |
 | **CASHIER** | Émission | Consultation | Émission | Clôture propre | Non | Non | Non |
 | **INVENTORY_MANAGER**| Non | Total | Non | Non | Non | Consultation | Non |
@@ -866,7 +866,7 @@ Le développement et les bancs d'essai de la solution ont été menés avec les 
 - **Compilateur & Langage :** TypeScript 5.7.3 pour le backend et le frontend web, Python 3.12 pour le client natif ;
 - **Serveur de base de données :** PostgreSQL 17.2 configuré sur port local 5432 ;
 - **IDE et éditeur de code :** Visual Studio Code avec extensions ESLint, Prisma et GitLens ;
-- **Framework UI Desktop :** PyQt6 version 6.8.0 avec module `PyQt6-WebEngine` ;
+- **Client Windows Desktop :** application native Python avec PyQt6 et QtWebEngine ;
 - **Outil de compilation autonome :** PyInstaller 6.11.1 pour la génération de l'exécutable `.exe`.
 
 ---
@@ -1011,11 +1011,12 @@ Nous espérons vivement que **Smart PME Finance** servira de référence académ
 
 ## Annexe 2 : Comptes et Rôles de Démonstration (Jeu d'Essai)
 
-| Rôle RBAC | Nom Complet | Adresse Email | Mot de passe |
-|---|---|---|---|
-| **Administrateur / Propriétaire** | Jean-Luc Tshisekedi | `admin@smartpme.cd` | `Admin@2026!` |
-| **Gérant / Manager** | Christian Mwamba | `manager@smartpme.cd` | `Manager@2026!` |
-| **Comptable** | Sarah Kalala | `comptable@smartpme.cd` | `Comptable@2026!` |
-| **Caissier Principal** | Patrick Kasongo | `caissier@smartpme.cd` | `Caissier@2026!` |
-| **Gestionnaire de Stock** | Daniel Ilunga | `stock@smartpme.cd` | `Stock@2026!` |
-| **Auditeur Interne** | Rachel Mpoyi | `auditeur@smartpme.cd` | `Auditeur@2026!` |
+| Rôle RBAC | Compte de test |
+|---|---|
+| **Administrateur / Propriétaire** | Généré par le seed local |
+| **Gérant / Manager** | Généré par le seed local |
+| **Comptable** | Généré par le seed local |
+| **Caissier Principal** | Généré par le seed local |
+| **Gestionnaire de Stock / Auditeur Interne** | À créer dans le jeu d'essai local si nécessaire |
+
+Les comptes de démonstration et mots de passe générés par le seed sont réservés au développement local et ne sont pas des identifiants de production.
