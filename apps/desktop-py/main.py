@@ -163,13 +163,15 @@ class SmartPMEDesktop(QMainWindow):
         self.status.addPermanentWidget(self.terminal_id_label)
 
         # Label Contrôle à distance
-        self.remote_status_label = QLabel("Supervision à distance : Active")
+        self.remote_status_label = QLabel("Supervision : Vérification...")
         self.remote_status_label.setStyleSheet("padding: 2px 8px; font-size: 11px; color: #0284C7;")
+        self.remote_status_label.setToolTip("Heartbeat et verrouillage à distance. Ce statut ne représente pas la synchronisation commerciale.")
         self.status.addPermanentWidget(self.remote_status_label)
 
-        # Label d'état du serveur
-        self.api_status_label = QLabel("Serveur : Vérification...")
+        # L'API est supervisée ici; la file métier est gérée et affichée par l'application web intégrée.
+        self.api_status_label = QLabel("API : Vérification...")
         self.api_status_label.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        self.api_status_label.setToolTip("Disponibilité de l'API uniquement. Consultez l’indicateur de l’application pour l’état des opérations hors-ligne.")
         self.status.addPermanentWidget(self.api_status_label)
 
     def on_load_started(self):
@@ -201,13 +203,13 @@ class SmartPMEDesktop(QMainWindow):
             )
             with urllib.request.urlopen(req, timeout=3) as response:
                 if response.status == 200:
-                    self.api_status_label.setText("Serveur : En ligne")
+                    self.api_status_label.setText("API : En ligne")
                     self.api_status_label.setStyleSheet("padding: 2px 8px; font-size: 11px; color: #166534; font-weight: bold;")
                 else:
-                    self.api_status_label.setText("Serveur : Réponse anormale")
+                    self.api_status_label.setText("API : Réponse anormale")
                     self.api_status_label.setStyleSheet("padding: 2px 8px; font-size: 11px; color: #B45309;")
         except Exception:
-            self.api_status_label.setText("Serveur : Hors-Ligne")
+            self.api_status_label.setText("API : Hors-Ligne")
             self.api_status_label.setStyleSheet("padding: 2px 8px; font-size: 11px; color: #991B1B; font-weight: bold;")
 
     def check_remote_control(self):

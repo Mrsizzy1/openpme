@@ -1,5 +1,12 @@
 const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:3001/api/v1`;
 
+export class ApiClientError extends Error {
+  constructor(message: string, readonly statusCode: number) {
+    super(message);
+    this.name = 'ApiClientError';
+  }
+}
+
 export class ApiClient {
   private static refreshPromise: Promise<any> | null = null;
   private static accessToken: string | null = null;
@@ -11,7 +18,7 @@ export class ApiClient {
     try {
       return JSON.parse(body);
     } catch {
-      throw new Error(`Réponse invalide du serveur (HTTP ${response.status}).`);
+      throw new ApiClientError(`Réponse invalide du serveur (HTTP ${response.status}).`, response.status);
     }
   }
 
@@ -141,7 +148,7 @@ export class ApiClient {
     const json = await this.parseResponse(response);
 
     if (!response.ok) {
-      throw new Error(json?.message || `La requête a échoué (HTTP ${response.status}).`);
+      throw new ApiClientError(json?.message || `La requête a échoué (HTTP ${response.status}).`, response.status);
     }
 
     return json;
@@ -232,6 +239,13 @@ export class ApiClient {
   static updateProduct(id: string, data: any) {
     return this.request<any>(`/products/${id}`, {
       method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static createStockMovement(id: string, data: any) {
+    return this.request<any>(`/products/${id}/stock-movements`, {
+      method: 'POST',
       body: JSON.stringify(data),
     });
   }

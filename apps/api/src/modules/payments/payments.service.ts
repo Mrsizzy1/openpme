@@ -41,7 +41,15 @@ export class PaymentsService {
 
   async createPayment(organizationId: string, userId: string, data: CreatePaymentDto) {
     const method = data.method ?? PaymentMethod.CASH;
-    return this.prisma.$transaction(async (transaction) => {
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+      if (data.idempotencyKey) {
+        const existing = await transaction.payment.findFirst({
+          where: { organizationId, idempotencyKey: data.idempotencyKey },
+        });
+        if (existing) return existing;
+      }
+
       const invoice = data.invoiceId
         ? await transaction.invoice.findFirst({
           where: { id: data.invoiceId, organizationId },
@@ -130,6 +138,7 @@ export class PaymentsService {
         data: {
           organizationId,
           paymentNumber,
+          idempotencyKey: data.idempotencyKey,
           invoiceId: data.invoiceId || null,
           customerId,
           cashSessionId: method === PaymentMethod.CASH ? data.cashSessionId : null,
@@ -182,6 +191,15 @@ export class PaymentsService {
       }
 
       return payment;
-    });
+      });
+    } catch (error) {
+      if (data.idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.prisma.payment.findFirst({
+          where: { organizationId, idempotencyKey: data.idempotencyKey },
+        });
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 }

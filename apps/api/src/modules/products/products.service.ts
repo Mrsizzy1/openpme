@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Currency, Prisma } from '@prisma/client';
+import { Currency, Prisma, StockMovementType } from '@prisma/client';
 import { decimalAmount } from '../../common/money/decimal-money';
 import { CreateProductDto, UpdateProductDto } from './products.dto';
+import { CreateStockMovementDto } from './stock-movement.dto';
 
 @Injectable()
 export class ProductsService {
@@ -120,6 +121,88 @@ export class ProductsService {
       data: updateData,
       include: { category: true },
     });
+  }
+
+  async createStockMovement(
+    organizationId: string,
+    userId: string,
+    productId: string,
+    data: CreateStockMovementDto,
+  ) {
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+      const existing = await transaction.stockMovement.findFirst({
+        where: { organizationId, idempotencyKey: data.idempotencyKey },
+      });
+      if (existing) return existing;
+
+      const locked = await transaction.$queryRaw<Array<{ currentStock: number; isService: boolean }>>(Prisma.sql`
+        SELECT "currentStock", "isService"
+        FROM "products"
+        WHERE "id" = ${productId} AND "organizationId" = ${organizationId}
+        FOR UPDATE
+      `);
+      const product = locked[0];
+      if (!product) throw new NotFoundException('Produit introuvable dans cette entreprise.');
+      if (product.isService) throw new BadRequestException('Les prestations de service ne gèrent pas de stock.');
+
+      const newStock = product.currentStock + data.quantity;
+      if (newStock < 0) {
+        throw new BadRequestException(
+          `Stock insuffisant : il reste ${product.currentStock} article(s), la sortie demandée dépasse le disponible.`,
+        );
+      }
+
+      const warehouse = await transaction.warehouse.findFirst({
+        where: { organizationId, isDefault: true },
+        select: { id: true },
+      });
+      if (!warehouse) throw new BadRequestException('Aucun dépôt de stockage par défaut configuré.');
+
+      await transaction.product.update({
+        where: { id: productId },
+        data: { currentStock: newStock },
+      });
+      await transaction.warehouseStock.upsert({
+        where: {
+          warehouseId_productId: {
+            warehouseId: warehouse.id,
+            productId,
+          },
+        },
+        create: {
+          warehouseId: warehouse.id,
+          productId,
+          quantity: newStock,
+        },
+        update: { quantity: newStock },
+      });
+
+      return transaction.stockMovement.create({
+        data: {
+          organizationId,
+          idempotencyKey: data.idempotencyKey,
+          warehouseId: warehouse.id,
+          productId,
+          userId,
+          type: data.quantity > 0 ? StockMovementType.IN_ADJUSTMENT : StockMovementType.OUT_ADJUSTMENT,
+          quantity: Math.abs(data.quantity),
+          previousStock: product.currentStock,
+          newStock,
+          reference: `OFFLINE-${data.idempotencyKey}`,
+          reason: data.reason,
+        },
+      });
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.prisma.stockMovement.findFirst({
+          where: { organizationId, idempotencyKey: data.idempotencyKey },
+        });
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 
   async delete(organizationId: string, id: string) {

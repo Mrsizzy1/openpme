@@ -375,6 +375,7 @@ model Supplier {
 model Sale {
   id                   String       @id @default(uuid())
   organizationId       String
+  idempotencyKey String?
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   saleNumber           String
   customerId           String?
@@ -400,6 +401,7 @@ model Sale {
   @@index([organizationId])
   @@index([customerId])
   @@index([userId])
+  @@unique([organizationId, idempotencyKey])
   @@map("sales")
 }
 
@@ -465,6 +467,7 @@ model PurchaseItem {
 model StockMovement {
   id             String            @id @default(uuid())
   organizationId String
+  idempotencyKey String?
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   warehouseId    String
   warehouse      Warehouse         @relation(fields: [warehouseId], references: [id])
@@ -483,6 +486,7 @@ model StockMovement {
   @@index([organizationId])
   @@index([productId])
   @@index([warehouseId])
+  @@unique([organizationId, idempotencyKey])
   @@map("stock_movements")
 }
 
@@ -541,6 +545,7 @@ model InvoiceItem {
 model Payment {
   id                   String        @id @default(uuid())
   organizationId       String
+  idempotencyKey String?
   organization         Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   paymentNumber        String
   invoiceId            String?
@@ -565,6 +570,7 @@ model Payment {
   @@index([organizationId])
   @@index([invoiceId])
   @@index([customerId])
+  @@unique([organizationId, idempotencyKey])
   @@map("payments")
 }
 
@@ -651,6 +657,7 @@ model FinancialAccount {
 model Expense {
   id                   String            @id @default(uuid())
   organizationId       String
+  idempotencyKey String?
   organization         Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   expenseNumber        String
   category             String
@@ -671,6 +678,7 @@ model Expense {
   @@unique([organizationId, expenseNumber])
   @@index([organizationId])
   @@index([userId])
+  @@unique([organizationId, idempotencyKey])
   @@map("expenses")
 }
 

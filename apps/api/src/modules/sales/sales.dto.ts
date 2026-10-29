@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsNotEmpty,
+  IsUUID,
   Max,
   Min,
   ValidateNested,
@@ -78,6 +79,11 @@ export class CreateSalePaymentDto {
 }
 
 export class CreateSaleDto {
+  @ApiPropertyOptional({ format: 'uuid', description: 'Clé stable de rejeu pour les ventes synchronisées hors ligne.' })
+  @IsOptional()
+  @IsUUID('4')
+  idempotencyKey?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

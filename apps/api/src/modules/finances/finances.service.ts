@@ -35,6 +35,13 @@ export class FinancesService {
   }
 
   async createExpense(organizationId: string, userId: string, data: CreateExpenseDto) {
+    if (data.idempotencyKey) {
+      const existing = await this.prisma.expense.findFirst({
+        where: { organizationId, idempotencyKey: data.idempotencyKey },
+      });
+      if (existing) return existing;
+    }
+
     const currency = data.currency ?? Currency.CDF;
     const method = data.method ?? PaymentMethod.CASH;
     const amount = roundAmount(decimalAmount(data.amount), currency);
@@ -46,7 +53,9 @@ export class FinancesService {
     }
 
     const expenseNumber = `DEP-${Date.now().toString().slice(-6)}`;
-    const expense = await this.prisma.$transaction(async (tx) => {
+    let expense;
+    try {
+      expense = await this.prisma.$transaction(async (tx) => {
       const exchangeRate = await currentExchangeRate(tx, organizationId);
       const orgSettings = await tx.organizationSettings.findUnique({
         where: { organizationId },
@@ -83,6 +92,7 @@ export class FinancesService {
         data: {
           organizationId,
           expenseNumber,
+          idempotencyKey: data.idempotencyKey,
           category: data.category || 'Frais Généraux',
           amount,
           currency,
@@ -145,7 +155,16 @@ export class FinancesService {
       }
 
       return exp;
-    });
+      });
+    } catch (error) {
+      if (data.idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.prisma.expense.findFirst({
+          where: { organizationId, idempotencyKey: data.idempotencyKey },
+        });
+        if (existing) return existing;
+      }
+      throw error;
+    }
 
     return expense;
   }

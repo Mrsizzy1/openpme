@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { isNetworkFailure, offlineSync } from '../services/offlineSync';
 import { exportToCsv } from '../utils/exportCsv';
 
 const EXPENSE_CATEGORIES = [
@@ -136,18 +137,20 @@ export const FinancesPage: React.FC = () => {
       return;
     }
     setSubmittingExpense(true);
+    const expensePayload = {
+      idempotencyKey: crypto.randomUUID(),
+      category: expCategory,
+      amount: expAmount,
+      beneficiary: expBeneficiary.trim(),
+      method: expMethod,
+      reference: expRef.trim() || undefined,
+      notes: expNotes.trim() || undefined,
+      currency: expenseCurrency,
+      cashSessionId: expMethod === 'CASH' ? cashSessions[expenseCurrency]?.id : undefined,
+      financialAccountId: expMethod === 'CASH' ? undefined : expAccountId || undefined,
+    };
     try {
-      await ApiClient.createExpense({
-        category: expCategory,
-        amount: expAmount,
-        beneficiary: expBeneficiary.trim(),
-        method: expMethod,
-        reference: expRef.trim() || undefined,
-        notes: expNotes.trim() || undefined,
-        currency: expenseCurrency,
-        cashSessionId: expMethod === 'CASH' ? cashSessions[expenseCurrency]?.id : undefined,
-        financialAccountId: expMethod === 'CASH' ? undefined : expAccountId || undefined,
-      });
+      await ApiClient.createExpense(expensePayload);
       setShowExpenseModal(false);
       setExpAmount('');
       setExpBeneficiary('');
@@ -156,7 +159,27 @@ export const FinancesPage: React.FC = () => {
       success(`Dépense de ${formatCurrency(amt, expenseCurrency)} enregistrée.`);
       loadFinances();
     } catch (err: any) {
-      setExpError(err.message || 'Erreur lors de l\'enregistrement de la dépense.');
+      if (isNetworkFailure(err)) {
+        if (expMethod !== 'CASH') {
+          setExpError('Une dépense hors espèces doit être confirmée par le service de paiement. Rétablissez la connexion avant de réessayer.');
+        } else {
+          try {
+            await offlineSync.enqueueExpense(expensePayload);
+            setShowExpenseModal(false);
+            setExpAmount('');
+            setExpBeneficiary('');
+            setExpRef('');
+            setExpNotes('');
+            success(`Dépense de ${formatCurrency(amt, expenseCurrency)} enregistrée hors-ligne. Elle sera synchronisée dès le retour du réseau.`);
+          } catch (storageError) {
+            setExpError(storageError instanceof Error
+              ? `La dépense n’a pas été enregistrée. ${storageError.message}`
+              : 'La dépense n’a pas été enregistrée : stockage hors-ligne indisponible.');
+          }
+        }
+      } else {
+        setExpError(err.message || 'Erreur lors de l\'enregistrement de la dépense.');
+      }
     } finally {
       setSubmittingExpense(false);
     }

@@ -7,6 +7,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
 import { CreateProductDto, UpdateProductDto } from './products.dto';
+import { CreateStockMovementDto } from './stock-movement.dto';
 
 const PRODUCT_READ_ROLES = [
   UserRole.SUPER_ADMIN,
@@ -43,6 +44,18 @@ export class ProductsController {
   @ApiOperation({ summary: 'Lister les articles sous le seuil d’alerte de stock' })
   async getLowStock(@CurrentUser('organizationId') orgId: string) {
     return this.productsService.getLowStock(orgId);
+  }
+
+  @Post(':id/stock-movements')
+  @Roles(...PRODUCT_MANAGEMENT_ROLES)
+  @ApiOperation({ summary: 'Enregistrer un mouvement de stock signé, idempotent et fusionnable hors ligne' })
+  async createStockMovement(
+    @CurrentUser('organizationId') orgId: string,
+    @CurrentUser('id') userId: string,
+    @Param('id') productId: string,
+    @Body() body: CreateStockMovementDto,
+  ) {
+    return this.productsService.createStockMovement(orgId, userId, productId, body);
   }
 
   @Get('categories')

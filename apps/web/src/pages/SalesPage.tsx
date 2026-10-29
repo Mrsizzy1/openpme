@@ -350,6 +350,7 @@ export const SalesPage: React.FC = () => {
     }
 
     const salePayload = {
+      idempotencyKey: crypto.randomUUID(),
       customerId: selectedCustomerId,
       immediatePayment,
       paymentMethod,
@@ -379,25 +380,7 @@ export const SalesPage: React.FC = () => {
         return;
       }
       try {
-        const offlineRecord = offlineSync.enqueueSale({
-          customerId: selectedCustomerId,
-          customerName: customers.find((c) => c.id === selectedCustomerId)?.name || 'Client',
-          items: cart.map((i) => ({
-            productId: i.productId,
-            productName: i.name,
-            quantity: i.quantity,
-            unitPrice: i.unitPrice,
-            total: i.quantity * i.unitPrice,
-          })),
-          subtotal,
-          taxAmount,
-          total: netTotal,
-          currency: saleCurrency,
-          paymentMethod,
-          immediatePayment,
-          payments: salePayload.payments,
-          notes: salePayload.notes,
-        });
+        const offlineRecord = await offlineSync.enqueueSale(salePayload);
 
         setIsOfflineSale(true);
         setSuccessSale({
@@ -439,30 +422,12 @@ export const SalesPage: React.FC = () => {
       loadData();
     } catch (err: any) {
       // Si l'erreur est réseau, basculer automatiquement en enregistrement hors-ligne
-      if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError') || !navigator.onLine) {
+      if (err.message?.includes('inaccessible') || err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError') || !navigator.onLine) {
         if (immediatePayment && paymentMethod !== 'CASH') {
           setErrorMsg('Le paiement par banque ou Mobile Money n’a pas pu être confirmé. La vente n’a pas été enregistrée.');
           return;
         }
-        const offlineRecord = offlineSync.enqueueSale({
-          customerId: selectedCustomerId,
-          customerName: customers.find((c) => c.id === selectedCustomerId)?.name || 'Client',
-          items: cart.map((i) => ({
-            productId: i.productId,
-            productName: i.name,
-            quantity: i.quantity,
-            unitPrice: i.unitPrice,
-            total: i.quantity * i.unitPrice,
-          })),
-          subtotal,
-          taxAmount,
-          total: netTotal,
-          currency: saleCurrency,
-          paymentMethod,
-          immediatePayment,
-          payments: salePayload.payments,
-          notes: salePayload.notes,
-        });
+        const offlineRecord = await offlineSync.enqueueSale(salePayload);
 
         setIsOfflineSale(true);
         setSuccessSale({

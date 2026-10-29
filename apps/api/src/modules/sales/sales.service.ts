@@ -98,8 +98,16 @@ export class SalesService {
     if (!data.items?.length) {
       throw new BadRequestException('Une vente doit contenir au moins un article.');
     }
+    if (data.idempotencyKey) {
+      const existing = await this.prisma.sale.findFirst({
+        where: { organizationId, idempotencyKey: data.idempotencyKey },
+        include: { items: { include: { product: true } }, customer: true },
+      });
+      if (existing) return { sale: existing, invoice: await this.prisma.invoice.findUnique({ where: { saleId: existing.id } }) };
+    }
 
-    return this.prisma.$transaction(async (transaction) => {
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
       const orgSettings = await transaction.organizationSettings.findUnique({
         where: { organizationId },
       });
@@ -301,8 +309,17 @@ export class SalesService {
       }
 
       for (const item of itemsWithCalc) {
-        const currentStock = item.product.currentStock;
         if (!item.product.isService) {
+          const lockedStock = await transaction.$queryRaw<Array<{ currentStock: number }>>(Prisma.sql`
+            SELECT "currentStock"
+            FROM "products"
+            WHERE "id" = ${item.product.id} AND "organizationId" = ${organizationId}
+            FOR UPDATE
+          `);
+          const currentStock = lockedStock[0]?.currentStock;
+          if (currentStock === undefined) {
+            throw new NotFoundException(`Produit "${item.product.name}" introuvable dans cette entreprise.`);
+          }
           const newStock = currentStock - item.quantity;
           if (newStock < 0) {
             await transaction.anomalyAlert.create({
@@ -378,6 +395,7 @@ export class SalesService {
         data: {
           organizationId,
           saleNumber,
+          idempotencyKey: data.idempotencyKey,
           customerId: data.customerId || null,
           userId,
           subtotal,
@@ -490,6 +508,21 @@ export class SalesService {
       }
 
       return { sale, invoice };
-    });
+      });
+    } catch (error) {
+      if (data.idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.prisma.sale.findFirst({
+          where: { organizationId, idempotencyKey: data.idempotencyKey },
+          include: { items: { include: { product: true } }, customer: true },
+        });
+        if (existing) {
+          return {
+            sale: existing,
+            invoice: await this.prisma.invoice.findUnique({ where: { saleId: existing.id } }),
+          };
+        }
+      }
+      throw error;
+    }
   }
 }
