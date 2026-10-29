@@ -6,6 +6,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
+import { CreateSaleDto } from './sales.dto';
 
 @ApiTags('Sales & Commercial')
 @Controller('sales')
@@ -32,7 +33,7 @@ export class SalesController {
   async createSale(
     @CurrentUser('organizationId') orgId: string,
     @CurrentUser('id') userId: string,
-    @Body() body: any,
+    @Body() body: CreateSaleDto,
   ) {
     return this.salesService.createSale(orgId, userId, body);
   }

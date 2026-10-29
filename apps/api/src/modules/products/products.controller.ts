@@ -6,6 +6,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
+import { CreateProductDto, UpdateProductDto } from './products.dto';
 
 @ApiTags('Products & Inventory')
 @Controller('products')
@@ -56,7 +57,7 @@ export class ProductsController {
 
   @Post()
   @ApiOperation({ summary: 'Créer un nouveau produit ou service' })
-  async create(@CurrentUser('organizationId') orgId: string, @Body() body: any) {
+  async create(@CurrentUser('organizationId') orgId: string, @Body() body: CreateProductDto) {
     return this.productsService.create(orgId, body);
   }
 
@@ -65,7 +66,7 @@ export class ProductsController {
   async update(
     @CurrentUser('organizationId') orgId: string,
     @Param('id') id: string,
-    @Body() body: any,
+    @Body() body: UpdateProductDto,
   ) {
     return this.productsService.update(orgId, id, body);
   }

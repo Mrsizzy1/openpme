@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
-import { formatCurrency } from '@smart-pme/shared';
+import { Currency, formatCurrency } from '@smart-pme/shared';
 import {
   TrendingUp,
   Receipt,
@@ -42,14 +42,16 @@ export const DashboardPage: React.FC = () => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [displayCurrency, setDisplayCurrency] = useState<Currency | undefined>();
   const navigate = useNavigate();
 
-  const loadMetrics = async () => {
+  const loadMetrics = async (currency = displayCurrency) => {
     try {
       setLoading(true);
       setError(null);
-      const res = await ApiClient.getDashboardMetrics();
+      const res = await ApiClient.getDashboardMetrics(currency);
       setData(res);
+      setDisplayCurrency(res.metrics.displayCurrency);
     } catch (err: any) {
       setError(err.message || 'Impossible de charger les indicateurs.');
     } finally {
@@ -81,7 +83,7 @@ export const DashboardPage: React.FC = () => {
             type="button"
             className="btn btn-sm btn-secondary"
             style={{ marginTop: '8px' }}
-            onClick={loadMetrics}
+            onClick={() => loadMetrics()}
           >
             <RefreshCw size={12} /> Réessayer
           </button>
@@ -96,6 +98,24 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem' }}>
+          Devise d’affichage
+          <select
+            className="input-field"
+            style={{ width: '130px' }}
+            value={metrics.displayCurrency}
+            onChange={(event) => {
+              const currency = event.target.value === Currency.USD ? Currency.USD : Currency.CDF;
+              setDisplayCurrency(currency);
+              loadMetrics(currency);
+            }}
+          >
+            <option value={Currency.CDF}>CDF</option>
+            <option value={Currency.USD}>USD</option>
+          </select>
+        </label>
+      </div>
       {/* Bandeau anomalies actives */}
       {metrics.activeAnomaliesCount > 0 && (
         <div className="alert alert-warning" style={{ marginBottom: '20px' }}>
@@ -127,7 +147,7 @@ export const DashboardPage: React.FC = () => {
             <TrendingUp size={15} color="#2563EB" />
           </div>
           <div className="kpi-value">
-            {formatCurrency(metrics.todaySales, metrics.primaryCurrency)}
+            {formatCurrency(metrics.todaySales, metrics.displayCurrency)}
           </div>
           <div className="kpi-sub">{metrics.todaySalesCount} vente(s) aujourd'hui</div>
         </div>
@@ -138,7 +158,7 @@ export const DashboardPage: React.FC = () => {
             <ShoppingCart size={15} color="#0891B2" />
           </div>
           <div className="kpi-value">
-            {formatCurrency(metrics.monthlyRevenue, metrics.primaryCurrency)}
+            {formatCurrency(metrics.monthlyRevenue, metrics.displayCurrency)}
           </div>
           <div className="kpi-sub">Période en cours (ventes & factures)</div>
         </div>
@@ -149,9 +169,9 @@ export const DashboardPage: React.FC = () => {
             <ArrowUpRight size={15} color={metrics.netMargin >= 0 ? '#16A34A' : '#DC2626'} />
           </div>
           <div className="kpi-value" style={{ color: metrics.netMargin >= 0 ? '#16A34A' : '#DC2626' }}>
-            {formatCurrency(metrics.netMargin, metrics.primaryCurrency)}
+            {formatCurrency(metrics.netMargin, metrics.displayCurrency)}
           </div>
-          <div className="kpi-sub">Dépenses : {formatCurrency(metrics.monthlyExpenses, metrics.primaryCurrency)}</div>
+          <div className="kpi-sub">Dépenses : {formatCurrency(metrics.monthlyExpenses, metrics.displayCurrency)}</div>
         </div>
 
         <div className="kpi-card">
@@ -160,7 +180,7 @@ export const DashboardPage: React.FC = () => {
             <Wallet size={15} color="#D97706" />
           </div>
           <div className="kpi-value">
-            {formatCurrency(metrics.totalCashBalance, metrics.primaryCurrency)}
+            {formatCurrency(metrics.totalCashBalance, metrics.displayCurrency)}
           </div>
           <div className="kpi-sub">Caisses & comptes bancaires</div>
         </div>
@@ -171,7 +191,7 @@ export const DashboardPage: React.FC = () => {
             <Receipt size={15} color="#2563EB" />
           </div>
           <div className="kpi-value">
-            {formatCurrency(metrics.totalReceivables, metrics.primaryCurrency)}
+            {formatCurrency(metrics.totalReceivables, metrics.displayCurrency)}
           </div>
           <div className="kpi-sub" style={{ color: metrics.unpaidInvoicesCount > 0 ? '#D97706' : undefined }}>
             {metrics.unpaidInvoicesCount} facture(s) impayée(s)
@@ -184,7 +204,7 @@ export const DashboardPage: React.FC = () => {
             <ArrowDownRight size={15} color="#DC2626" />
           </div>
           <div className="kpi-value">
-            {formatCurrency(metrics.totalPayables, metrics.primaryCurrency)}
+            {formatCurrency(metrics.totalPayables, metrics.displayCurrency)}
           </div>
           <div className="kpi-sub">Engagements achats à régulariser</div>
         </div>
@@ -392,7 +412,7 @@ export const DashboardPage: React.FC = () => {
 
       {/* Bouton actualiser */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
-        <button type="button" className="btn btn-sm btn-secondary" onClick={loadMetrics}>
+        <button type="button" className="btn btn-sm btn-secondary" onClick={() => loadMetrics()}>
           <RefreshCw size={13} /> Actualiser
         </button>
       </div>

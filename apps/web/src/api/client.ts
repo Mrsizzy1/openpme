@@ -153,8 +153,9 @@ export class ApiClient {
   }
 
   // Dashboard
-  static getDashboardMetrics() {
-    return this.request<any>('/dashboard/metrics');
+  static getDashboardMetrics(currency?: string) {
+    const query = currency ? `?currency=${encodeURIComponent(currency)}` : '';
+    return this.request<any>(`/dashboard/metrics${query}`);
   }
 
   // Products
@@ -287,8 +288,9 @@ export class ApiClient {
     return this.request<any[]>('/finances/cash-registers');
   }
 
-  static getCurrentCashSession() {
-    return this.request<any>('/finances/cash-sessions/current');
+  static getCurrentCashSession(currency?: string) {
+    const query = currency ? `?currency=${encodeURIComponent(currency)}` : '';
+    return this.request<any>(`/finances/cash-sessions/current${query}`);
   }
 
   static openCashSession(data: any) {
@@ -298,7 +300,7 @@ export class ApiClient {
     });
   }
 
-  static closeCashSession(sessionId: string, closingCountedBalance: number, notes?: string) {
+  static closeCashSession(sessionId: string, closingCountedBalance: number | string, notes?: string) {
     return this.request<any>(`/finances/cash-sessions/${sessionId}/close`, {
       method: 'PATCH',
       body: JSON.stringify({ closingCountedBalance, notes }),
@@ -342,6 +344,10 @@ export class ApiClient {
       method: 'PUT',
       body: JSON.stringify(settings),
     });
+  }
+
+  static getExchangeRates(limit = 100) {
+    return this.request<any[]>(`/organizations/exchange-rates?limit=${limit}`);
   }
 
   static updateOrgProfile(profile: any) {

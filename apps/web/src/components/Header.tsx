@@ -21,6 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
   const navigate = useNavigate();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingSyncCount, setPendingSyncCount] = useState(offlineSync.getPendingCount());
+  const [pendingSyncError, setPendingSyncError] = useState(offlineSync.getPendingSyncError());
   const [isSyncing, setIsSyncing] = useState(false);
   const [showRateModal, setShowRateModal] = useState(false);
   const [newRateInput, setNewRateInput] = useState('');
@@ -37,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const unsubscribe = offlineSync.subscribe(() => {
       setPendingSyncCount(offlineSync.getPendingCount());
+      setPendingSyncError(offlineSync.getPendingSyncError());
     });
 
     return () => {
@@ -53,6 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
     } finally {
       setIsSyncing(false);
       setPendingSyncCount(offlineSync.getPendingCount());
+      setPendingSyncError(offlineSync.getPendingSyncError());
     }
   };
 
@@ -88,6 +91,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {/* Statut Réseau & Synchro Offline */}
           <div
+            title={pendingSyncError}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -308,4 +312,3 @@ export const Header: React.FC<HeaderProps> = ({
     </>
   );
 };
-

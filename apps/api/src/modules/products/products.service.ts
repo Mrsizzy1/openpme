@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Currency } from '@prisma/client';
+import { Currency, Prisma } from '@prisma/client';
+import { decimalAmount } from '../../common/money/decimal-money';
+import { CreateProductDto, UpdateProductDto } from './products.dto';
 
 @Injectable()
 export class ProductsService {
@@ -46,7 +48,13 @@ export class ProductsService {
     return product;
   }
 
-  async create(organizationId: string, data: any) {
+  async create(organizationId: string, data: CreateProductDto) {
+    const purchasePrice = decimalAmount(data.purchasePrice ?? '0', 'prix d’achat');
+    const salePrice = decimalAmount(data.salePrice, 'prix de vente');
+    if (purchasePrice.lt(0)) throw new BadRequestException('Le prix d’achat ne peut pas être négatif.');
+    if (salePrice.lte(0)) throw new BadRequestException('Le prix de vente doit être supérieur à zéro.');
+    if (data.categoryId) await this.ensureCategoryBelongsToOrganization(organizationId, data.categoryId);
+
     const defaultWarehouse = await this.prisma.warehouse.findFirst({
       where: { organizationId, isDefault: true },
     });
@@ -59,8 +67,8 @@ export class ProductsService {
         name: data.name,
         description: data.description,
         categoryId: data.categoryId,
-        purchasePrice: data.purchasePrice || 0,
-        salePrice: data.salePrice || 0,
+        purchasePrice,
+        salePrice,
         currency: data.currency || Currency.CDF,
         minStockLevel: data.minStockLevel ?? 5,
         currentStock: data.initialStock ?? 0,
@@ -83,22 +91,33 @@ export class ProductsService {
     return product;
   }
 
-  async update(organizationId: string, id: string, data: any) {
+  async update(organizationId: string, id: string, data: UpdateProductDto) {
     await this.findById(organizationId, id);
+    if (data.categoryId) await this.ensureCategoryBelongsToOrganization(organizationId, data.categoryId);
+
+    const updateData: Prisma.ProductUncheckedUpdateInput = {
+      name: data.name,
+      description: data.description,
+      categoryId: data.categoryId,
+      currency: data.currency,
+      minStockLevel: data.minStockLevel,
+      unit: data.unit,
+      isActive: data.isActive,
+    };
+    if (data.purchasePrice !== undefined) {
+      const purchasePrice = decimalAmount(data.purchasePrice, 'prix d’achat');
+      if (purchasePrice.lt(0)) throw new BadRequestException('Le prix d’achat ne peut pas être négatif.');
+      updateData.purchasePrice = purchasePrice;
+    }
+    if (data.salePrice !== undefined) {
+      const salePrice = decimalAmount(data.salePrice, 'prix de vente');
+      if (salePrice.lte(0)) throw new BadRequestException('Le prix de vente doit être supérieur à zéro.');
+      updateData.salePrice = salePrice;
+    }
 
     return this.prisma.product.update({
       where: { id },
-      data: {
-        name: data.name,
-        description: data.description,
-        categoryId: data.categoryId,
-        purchasePrice: data.purchasePrice,
-        salePrice: data.salePrice,
-        currency: data.currency,
-        minStockLevel: data.minStockLevel,
-        unit: data.unit,
-        isActive: data.isActive,
-      },
+      data: updateData,
       include: { category: true },
     });
   }
@@ -147,5 +166,13 @@ export class ProductsService {
         description,
       },
     });
+  }
+
+  private async ensureCategoryBelongsToOrganization(organizationId: string, categoryId: string) {
+    const category = await this.prisma.category.findFirst({
+      where: { id: categoryId, organizationId },
+      select: { id: true },
+    });
+    if (!category) throw new NotFoundException('Catégorie introuvable dans cette entreprise.');
   }
 }

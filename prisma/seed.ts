@@ -70,13 +70,28 @@ async function main() {
   });
 
   // 3. Taux de change officiel BCC initial
-  await prisma.exchangeRate.create({
-    data: {
+  const rateDate = new Date();
+  rateDate.setUTCHours(0, 0, 0, 0);
+  await prisma.exchangeRate.upsert({
+    where: {
+      organizationId_fromCurrency_toCurrency_effectiveDate: {
+        organizationId: org.id,
+        fromCurrency: Currency.USD,
+        toCurrency: Currency.CDF,
+        effectiveDate: rateDate,
+      },
+    },
+    update: {
+      rate: 2850.00,
+      source: 'Taux initial de développement',
+    },
+    create: {
       organizationId: org.id,
       fromCurrency: Currency.USD,
       toCurrency: Currency.CDF,
       rate: 2850.00,
-      source: 'Banque Centrale du Congo (BCC)',
+      source: 'Taux initial de développement',
+      effectiveDate: rateDate,
     },
   });
 

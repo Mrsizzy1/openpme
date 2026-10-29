@@ -27,6 +27,7 @@ export const ProductsPage: React.FC = () => {
   const [formDescription, setFormDescription] = useState('');
   const [formPurchasePrice, setFormPurchasePrice] = useState('');
   const [formSalePrice, setFormSalePrice] = useState('');
+  const [formCurrency, setFormCurrency] = useState<Currency>(Currency.CDF);
   const [formStock, setFormStock] = useState('0');
   const [formMinStock, setFormMinStock] = useState('5');
   const [formUnit, setFormUnit] = useState('Pièce');
@@ -69,6 +70,7 @@ export const ProductsPage: React.FC = () => {
     setFormDescription('');
     setFormPurchasePrice('');
     setFormSalePrice('');
+    setFormCurrency(organization?.settings?.primaryCurrency === Currency.USD ? Currency.USD : Currency.CDF);
     setFormStock('0');
     setFormMinStock('5');
     setFormUnit('Pièce');
@@ -96,13 +98,13 @@ export const ProductsPage: React.FC = () => {
         code: formCode.trim() || undefined,
         categoryId: formCategoryId || undefined,
         description: formDescription.trim() || undefined,
-        purchasePrice: parseFloat(formPurchasePrice) || 0,
-        salePrice: parseFloat(formSalePrice),
+        purchasePrice: formPurchasePrice || '0',
+        salePrice: formSalePrice,
+        currency: formCurrency,
         initialStock: formIsService ? 0 : parseInt(formStock, 10) || 0,
         minStockLevel: formIsService ? 0 : parseInt(formMinStock, 10) || 5,
         unit: formUnit.trim() || 'Pièce',
         isService: formIsService,
-        currency: 'CDF',
       });
       setShowAddModal(false);
       resetForm();
@@ -123,6 +125,7 @@ export const ProductsPage: React.FC = () => {
     setFormDescription(product.description || '');
     setFormPurchasePrice(String(product.purchasePrice || '0'));
     setFormSalePrice(String(product.salePrice || '0'));
+    setFormCurrency(product.currency === Currency.USD ? Currency.USD : Currency.CDF);
     setFormStock(String(product.currentStock || '0'));
     setFormMinStock(String(product.minStockLevel || '5'));
     setFormUnit(product.unit || 'Pièce');
@@ -150,8 +153,9 @@ export const ProductsPage: React.FC = () => {
         name: formName.trim(),
         categoryId: formCategoryId || null,
         description: formDescription.trim() || null,
-        purchasePrice: parseFloat(formPurchasePrice) || 0,
-        salePrice: parseFloat(formSalePrice),
+        purchasePrice: formPurchasePrice || '0',
+        salePrice: formSalePrice,
+        currency: formCurrency,
         minStockLevel: parseInt(formMinStock, 10) || 5,
         unit: formUnit.trim() || 'Pièce',
       });
@@ -462,9 +466,18 @@ export const ProductsPage: React.FC = () => {
                   />
                 </div>
 
+                <div className="form-group">
+                  <label className="form-label" htmlFor="prod-currency">Devise de référence des prix</label>
+                  <select id="prod-currency" className="input-field" value={formCurrency}
+                    onChange={(e) => setFormCurrency(e.target.value === Currency.USD ? Currency.USD : Currency.CDF)}>
+                    <option value="CDF">CDF — Franc Congolais</option>
+                    <option value="USD">USD — Dollar américain</option>
+                  </select>
+                </div>
+
                 <div className="form-grid">
                   <div className="form-group">
-                    <label className="form-label" htmlFor="prod-buy">Prix d'achat (CDF)</label>
+                    <label className="form-label" htmlFor="prod-buy">Prix d'achat ({formCurrency})</label>
                     <input
                       id="prod-buy"
                       type="number"
@@ -478,7 +491,7 @@ export const ProductsPage: React.FC = () => {
                   </div>
                   <div className="form-group">
                     <label className="form-label" htmlFor="prod-sell">
-                      Prix de vente (CDF) <span className="required">*</span>
+                      Prix de vente ({formCurrency}) <span className="required">*</span>
                     </label>
                     <input
                       id="prod-sell"
@@ -508,7 +521,7 @@ export const ProductsPage: React.FC = () => {
                   }}>
                     <span style={{ color: '#4B5563' }}>Marge estimée :</span>
                     <strong style={{ color: marginAmt > 0 ? '#16A34A' : '#DC2626' }}>
-                      {formatCurrency(marginAmt, Currency.CDF)} ({marginPct}%)
+                      {formatCurrency(marginAmt, formCurrency)} ({marginPct}%)
                     </strong>
                   </div>
                 )}
@@ -660,9 +673,18 @@ export const ProductsPage: React.FC = () => {
                   </div>
                 </div>
 
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-currency">Devise de référence des prix</label>
+                  <select id="edit-currency" className="input-field" value={formCurrency}
+                    onChange={(e) => setFormCurrency(e.target.value === Currency.USD ? Currency.USD : Currency.CDF)}>
+                    <option value="CDF">CDF — Franc Congolais</option>
+                    <option value="USD">USD — Dollar américain</option>
+                  </select>
+                </div>
+
                 <div className="form-grid">
                   <div className="form-group">
-                    <label className="form-label" htmlFor="edit-buy">Prix d'achat (CDF)</label>
+                    <label className="form-label" htmlFor="edit-buy">Prix d'achat ({formCurrency})</label>
                     <input
                       id="edit-buy"
                       type="number"
@@ -675,7 +697,7 @@ export const ProductsPage: React.FC = () => {
 
                   <div className="form-group">
                     <label className="form-label" htmlFor="edit-sell">
-                      Prix de vente (CDF) <span className="required">*</span>
+                      Prix de vente ({formCurrency}) <span className="required">*</span>
                     </label>
                     <input
                       id="edit-sell"

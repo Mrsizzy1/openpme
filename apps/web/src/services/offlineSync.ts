@@ -8,6 +8,14 @@ export interface OfflineSaleItem {
   productName?: string;
 }
 
+export interface OfflineSalePayment {
+  amount: string;
+  currency: string;
+  method: string;
+  cashSessionId?: string;
+  reference?: string;
+}
+
 export interface OfflineSaleRecord {
   id: string; // ID local provisoire (ex: OFFLINE-VNT-...)
   customerId?: string;
@@ -18,7 +26,8 @@ export interface OfflineSaleRecord {
   total: number;
   currency: string;
   paymentMethod: string;
-  amountReceived?: number;
+  immediatePayment?: boolean;
+  payments?: OfflineSalePayment[];
   notes?: string;
   createdAt: string;
   synced: boolean;
@@ -85,6 +94,10 @@ class OfflineSyncService {
     return this.getQueue().filter((s) => !s.synced).length;
   }
 
+  public getPendingSyncError(): string | undefined {
+    return this.getQueue().find((sale) => !sale.synced && sale.syncError)?.syncError;
+  }
+
   public enqueueSale(saleData: Omit<OfflineSaleRecord, 'id' | 'createdAt' | 'synced'>): OfflineSaleRecord {
     const queue = this.getQueue();
     const tempId = `OFFLINE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -124,15 +137,23 @@ class OfflineSyncService {
 
     for (const sale of pending) {
       try {
+        if (sale.immediatePayment !== false && !sale.payments) {
+          failedCount++;
+          sale.syncError = 'Cette ancienne vente hors ligne ne contient pas les règlements ni les sessions de caisse requis. Rapprochez-la manuellement avant de la resaisir.';
+          continue;
+        }
+
         await ApiClient.createSale({
           customerId: sale.customerId,
+          currency: sale.currency,
+          immediatePayment: sale.immediatePayment ?? false,
+          payments: sale.payments,
           items: sale.items.map((i) => ({
             productId: i.productId,
             quantity: i.quantity,
             unitPrice: i.unitPrice,
           })),
           paymentMethod: sale.paymentMethod,
-          amountReceived: sale.amountReceived,
           notes: `[Synchronisation Hors-Ligne] ${sale.notes || ''}`.trim(),
         });
 

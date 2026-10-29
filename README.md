@@ -39,6 +39,20 @@ Le seed contient des comptes de démonstration **réservés au développement lo
 
 Pour une base existante déjà créée avant l'ajout des migrations, sauvegardez-la, marquez le baseline déjà présent comme appliqué (`npx prisma migrate resolve --applied 20261029000000_init`), puis lancez `npm run prisma:migrate` pour appliquer la migration de suivi de session. Ne marquez le baseline qu'après avoir vérifié que la base correspond au schéma existant.
 
+### Devises et caisse
+
+Les prix produits ont une devise de référence (CDF ou USD). Le taux USD/CDF est enregistré par entreprise et par jour; chaque vente, paiement et dépense conserve le taux appliqué afin que les rapports ne changent pas rétroactivement. Les calculs de montant sont effectués avec des décimales, avec arrondi CDF à l’unité et USD au centime.
+
+Une vente peut être facturée en CDF ou USD et réglée en espèces dans l’une ou les deux devises. Pour chaque devise remise en espèces, le caissier doit avoir sa propre session ouverte; un rendu de monnaie est enregistré comme sortie de la session CDF. Les dépenses payées en espèces sont également enregistrées comme sorties de la session correspondante. Le tableau de bord permet de choisir la devise d’affichage.
+
+Après récupération des changements, appliquez les migrations avant de redémarrer l’API :
+
+```powershell
+npm run prisma:generate
+npm run prisma:migrate
+npm test
+```
+
 ### 3. Démarrer les services
 
 Dans des terminaux distincts :
