@@ -1,4 +1,4 @@
-const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:3001/api/v1`;
+const getApiBaseUrl = () => `${window.location.protocol}//${window.location.hostname}:3001/api/v1`;
 
 export class ApiClientError extends Error {
   constructor(message: string, readonly statusCode: number) {
@@ -64,7 +64,7 @@ export class ApiClient {
 
   private static async refreshSession() {
     if (!this.refreshPromise) {
-      this.refreshPromise = fetch(`${API_BASE_URL}/auth/refresh`, {
+      this.refreshPromise = fetch(`${getApiBaseUrl()}/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
       })
@@ -114,7 +114,7 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    return fetch(`${API_BASE_URL}${endpoint}`, {
+    return fetch(`${getApiBaseUrl()}${endpoint}`, {
       ...options,
       headers,
       credentials: 'include',
