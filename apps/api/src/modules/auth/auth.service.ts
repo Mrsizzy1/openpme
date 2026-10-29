@@ -12,6 +12,8 @@ const REFRESH_TOKEN_TTL_DAYS = 30;
 interface SessionContext {
   ipAddress?: string;
   userAgent?: string;
+  terminalId?: string;
+  terminalToken?: string;
 }
 
 @Injectable()
@@ -76,6 +78,7 @@ export class AuthService {
       data: {
         id: sessionId,
         userId: user.id,
+        terminalId: context.terminalId,
         token: hashSessionToken(accessToken),
         refreshToken: hashSessionToken(refreshToken),
         userAgent: context.userAgent?.slice(0, 512),
@@ -111,6 +114,22 @@ export class AuthService {
       throw new UnauthorizedException('Compte ou entreprise désactivé(e).');
     }
 
+    if (context.terminalId) {
+      const terminal = await this.prisma.desktopTerminal.findFirst({
+        where: {
+          terminalId: context.terminalId,
+          organizationId: user.organizationId,
+          tokenHash: hashSessionToken(context.terminalToken ?? ''),
+          tokenRevokedAt: null,
+          status: 'ACTIVE',
+        },
+        select: { id: true },
+      });
+      if (!terminal) {
+        throw new UnauthorizedException('Poste desktop verrouillé, révoqué ou non enrôlé.');
+      }
+    }
+
     if (passwordVerification.upgradedHash) {
       await this.prisma.user.update({
         where: { id: user.id },
@@ -138,6 +157,21 @@ export class AuthService {
     if (!session || session.revoked || session.expiresAt <= now
       || !session.user.isActive || !session.user.organization.isActive) {
       throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
+    }
+    if (session.terminalId) {
+      const terminal = await this.prisma.desktopTerminal.findFirst({
+        where: {
+          terminalId: session.terminalId,
+          organizationId: session.user.organizationId,
+          tokenHash: hashSessionToken(context.terminalToken ?? ''),
+          tokenRevokedAt: null,
+          status: 'ACTIVE',
+        },
+        select: { id: true },
+      });
+      if (!terminal) {
+        throw new UnauthorizedException('Poste desktop verrouillé ou révoqué.');
+      }
     }
 
     const nextRefreshToken = randomBytes(48).toString('base64url');

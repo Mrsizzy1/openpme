@@ -16,6 +16,8 @@ export class AuthController {
     return {
       ipAddress: request.ip,
       userAgent: request.get('user-agent'),
+      terminalId: request.get('x-desktop-terminal-id')?.slice(0, 100),
+      terminalToken: request.get('x-desktop-terminal-token'),
     };
   }
 

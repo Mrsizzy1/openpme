@@ -86,6 +86,11 @@ enum CashMovementType {
   OUT
 }
 
+enum DesktopTerminalStatus {
+  ACTIVE
+  LOCKED
+}
+
 enum AnomalySeverity {
   LOW
   MEDIUM
@@ -163,6 +168,7 @@ model Organization {
   anomalyAlerts     AnomalyAlert[]
   auditLogs         AuditLog[]
   exchangeRates     ExchangeRate[]
+  desktopTerminals  DesktopTerminal[]
 
   @@map("organizations")
 }
@@ -211,14 +217,15 @@ model User {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  sales          Sale[]
-  purchases      Purchase[]
-  stockMovements StockMovement[]
-  payments       Payment[]
-  expenses       Expense[]
-  cashSessions   CashSession[]
-  auditLogs      AuditLog[]
-  sessions       Session[]
+  sales           Sale[]
+  purchases       Purchase[]
+  stockMovements  StockMovement[]
+  payments        Payment[]
+  expenses        Expense[]
+  cashSessions    CashSession[]
+  auditLogs       AuditLog[]
+  sessions        Session[]
+  lockedTerminals DesktopTerminal[] @relation("DesktopTerminalLocker")
 
   @@index([organizationId])
   @@index([email])
@@ -229,6 +236,7 @@ model Session {
   id           String   @id @default(uuid())
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  terminalId   String?
   token        String   @unique
   refreshToken String?  @unique
   userAgent    String?
@@ -241,6 +249,34 @@ model Session {
   @@index([userId, revoked, expiresAt])
   @@index([lastSeenAt])
   @@map("sessions")
+}
+
+model DesktopTerminal {
+  id                  String                @id @default(uuid())
+  terminalId          String
+  organizationId      String
+  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  displayName         String
+  status              DesktopTerminalStatus @default(ACTIVE)
+  tokenHash           String?               @unique
+  tokenRevokedAt      DateTime?
+  lockReason          String?
+  lockedAt            DateTime?
+  lockedById          String?
+  lockedBy            User?                 @relation("DesktopTerminalLocker", fields: [lockedById], references: [id], onDelete: SetNull)
+  lastHeartbeatAt     DateTime?
+  lastIpAddress       String?
+  stateVersion        Int                   @default(1)
+  acknowledgedVersion Int                   @default(0)
+  lastAcknowledgedAt  DateTime?
+  offlineGraceHours   Int                   @default(24)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@unique([organizationId, terminalId])
+  @@index([organizationId, status])
+  @@index([organizationId, lastHeartbeatAt])
+  @@map("desktop_terminals")
 }
 
 model Category {
@@ -375,9 +411,9 @@ model Supplier {
 model Sale {
   id                   String       @id @default(uuid())
   organizationId       String
-  idempotencyKey String?
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   saleNumber           String
+  idempotencyKey       String?
   customerId           String?
   customer             Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
   userId               String
@@ -398,10 +434,10 @@ model Sale {
   invoice Invoice?
 
   @@unique([organizationId, saleNumber])
+  @@unique([organizationId, idempotencyKey])
   @@index([organizationId])
   @@index([customerId])
   @@index([userId])
-  @@unique([organizationId, idempotencyKey])
   @@map("sales")
 }
 
@@ -467,8 +503,8 @@ model PurchaseItem {
 model StockMovement {
   id             String            @id @default(uuid())
   organizationId String
-  idempotencyKey String?
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  idempotencyKey String?
   warehouseId    String
   warehouse      Warehouse         @relation(fields: [warehouseId], references: [id])
   productId      String
@@ -484,9 +520,9 @@ model StockMovement {
   createdAt      DateTime          @default(now())
 
   @@index([organizationId])
+  @@unique([organizationId, idempotencyKey])
   @@index([productId])
   @@index([warehouseId])
-  @@unique([organizationId, idempotencyKey])
   @@map("stock_movements")
 }
 
@@ -545,9 +581,9 @@ model InvoiceItem {
 model Payment {
   id                   String        @id @default(uuid())
   organizationId       String
-  idempotencyKey String?
   organization         Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   paymentNumber        String
+  idempotencyKey       String?
   invoiceId            String?
   invoice              Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
   customerId           String?
@@ -567,10 +603,10 @@ model Payment {
   createdAt            DateTime      @default(now())
 
   @@unique([organizationId, paymentNumber])
+  @@unique([organizationId, idempotencyKey])
   @@index([organizationId])
   @@index([invoiceId])
   @@index([customerId])
-  @@unique([organizationId, idempotencyKey])
   @@map("payments")
 }
 
@@ -657,9 +693,9 @@ model FinancialAccount {
 model Expense {
   id                   String            @id @default(uuid())
   organizationId       String
-  idempotencyKey String?
   organization         Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   expenseNumber        String
+  idempotencyKey       String?
   category             String
   amount               Decimal           @db.Decimal(15, 2)
   currency             Currency          @default(CDF)
@@ -676,9 +712,9 @@ model Expense {
   createdAt            DateTime          @default(now())
 
   @@unique([organizationId, expenseNumber])
+  @@unique([organizationId, idempotencyKey])
   @@index([organizationId])
   @@index([userId])
-  @@unique([organizationId, idempotencyKey])
   @@map("expenses")
 }
 

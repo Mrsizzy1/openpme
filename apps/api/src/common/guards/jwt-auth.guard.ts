@@ -35,7 +35,15 @@ export class JwtAuthGuard implements CanActivate {
     const now = new Date();
     const session = await this.prisma.session.findUnique({
       where: { id: payload.sid },
-      select: { id: true, userId: true, token: true, revoked: true, expiresAt: true, lastSeenAt: true },
+      select: {
+        id: true,
+        userId: true,
+        token: true,
+        terminalId: true,
+        revoked: true,
+        expiresAt: true,
+        lastSeenAt: true,
+      },
     });
 
     if (!session || session.userId !== payload.sub || session.revoked || session.expiresAt <= now
@@ -50,6 +58,20 @@ export class JwtAuthGuard implements CanActivate {
 
     if (!user || !user.isActive || !user.organization.isActive) {
       throw new UnauthorizedException('Utilisateur ou entreprise désactivé(e).');
+    }
+
+    if (session.terminalId) {
+      const terminal = await this.prisma.desktopTerminal.findFirst({
+        where: {
+          terminalId: session.terminalId,
+          organizationId: user.organizationId,
+          tokenRevokedAt: null,
+        },
+        select: { status: true },
+      });
+      if (!terminal || terminal.status === 'LOCKED') {
+        throw new UnauthorizedException('Poste desktop verrouillé ou révoqué.');
+      }
     }
 
     if (now.getTime() - session.lastSeenAt.getTime() >= 30_000) {
