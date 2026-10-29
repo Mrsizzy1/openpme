@@ -4,6 +4,17 @@ export class ApiClient {
   private static refreshPromise: Promise<any> | null = null;
   private static accessToken: string | null = null;
 
+  private static async parseResponse(response: Response): Promise<any> {
+    const body = await response.text();
+    if (!body.trim()) return null;
+
+    try {
+      return JSON.parse(body);
+    } catch {
+      throw new Error(`Réponse invalide du serveur (HTTP ${response.status}).`);
+    }
+  }
+
   private static getToken(): string | null {
     return this.accessToken;
   }
@@ -51,9 +62,12 @@ export class ApiClient {
         credentials: 'include',
       })
         .then(async (response) => {
-          const json = await response.json();
+          const json = await this.parseResponse(response);
           if (!response.ok) {
-            throw new Error(json.message || 'Session expirée');
+            throw new Error(json?.message || 'Session expirée');
+          }
+          if (!json?.accessToken || !json?.user || !json?.organization) {
+            throw new Error('La réponse de renouvellement de session est incomplète.');
           }
           this.setAuth(json.accessToken, json.user, json.organization);
           return json;
@@ -124,10 +138,10 @@ export class ApiClient {
       }
     }
 
-    const json = await response.json();
+    const json = await this.parseResponse(response);
 
     if (!response.ok) {
-      throw new Error(json.message || 'Une erreur est survenue');
+      throw new Error(json?.message || `La requête a échoué (HTTP ${response.status}).`);
     }
 
     return json;
