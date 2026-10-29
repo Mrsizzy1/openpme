@@ -911,7 +911,48 @@ Le client Desktop intègre un mécanisme de détection automatique d'état de l'
 
 ---
 
-## 5.4. Évaluation, tests de validation et analyse des performances
+## 5.4. Coupe-circuit distant bidirectionnel
+
+Chaque poste est enrôlé pour une entreprise et reçoit un jeton spécifique, distinct des jetons des utilisateurs. L'API ne conserve que le hachage du jeton; le desktop le stocke chiffré par DPAPI dans le profil Windows. L'état `ACTIVE` ou `LOCKED`, le motif, l'auteur, la version de commande et les accusés de réception sont persistés. Les transitions sont consignées dans le journal d'audit avec l'adresse IP et l'utilisateur manager.
+
+Le desktop transmet un heartbeat toutes les 15 secondes par défaut. Une transition verrouillée bloque l'interface et les requêtes des sessions liées au poste. Le client garde localement l'état verrouillé hors ligne; un poste actif dispose d'une période de grâce configurable de 24 heures par défaut. À la reconnexion, le statut serveur fait autorité et le client applique puis acquitte la nouvelle version. L'écran se déverrouille sans redémarrage du processus.
+
+```mermaid
+sequenceDiagram
+    actor Gerant
+    participant Web as Interface web
+    participant API as API NestJS
+    participant DB as PostgreSQL
+    participant PC as Desktop PyQt6
+
+    Gerant->>Web: Verrouiller / motif
+    Web->>API: POST /remote-control/terminals/:id/lock
+    API->>API: Vérifier session, rôle et entreprise
+    API->>DB: Persister LOCKED, version + 1, audit
+    API-->>Web: Commande envoyée / acquittement en attente
+    loop toutes les 10 à 30 secondes
+        PC->>API: Heartbeat signé + dernière version acquittée
+        API->>DB: Lire statut et enregistrer présence
+        API-->>PC: LOCKED ou ACTIVE, version et heure serveur
+        PC->>PC: Appliquer l'état et sauvegarder sous DPAPI
+    end
+    PC->>API: Heartbeat avec version appliquée
+    API->>DB: Enregistrer l'accusé
+    Web->>API: GET /remote-control/terminals
+    API-->>Web: Présence et état acquitté/en attente
+    Gerant->>Web: Déverrouiller / motif
+    Web->>API: POST /remote-control/terminals/:id/unlock
+    API->>DB: Persister ACTIVE, version + 1, audit
+    PC->>API: Heartbeat suivant
+    API-->>PC: ACTIVE
+    PC->>PC: Fermer l'écran de verrouillage
+```
+
+Cette protection n'est pas un mécanisme de gestion de périphérique (MDM) : un administrateur local Windows peut arrêter le processus ou modifier l'environnement de la machine. Les contrôles côté API empêchent cependant une session desktop verrouillée ou révoquée d'exécuter des opérations serveur.
+
+---
+
+## 5.5. Évaluation, tests de validation et analyse des performances
 
 Des campagnes d'évaluation ont été conduites sur un jeu d'essai simulant une semaine d'activité intense d'une PME kinoise (1 200 articles au catalogue, 3 caisses simultanées, 250 transactions par jour) :
 
