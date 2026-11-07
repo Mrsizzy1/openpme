@@ -27,6 +27,12 @@ build/
 out/
 .next/
 dist-electron/
+*.tsbuildinfo
+# PyInstaller desktop build outputs
+build_desktop/
+dist_desktop/
+# Local tool cache
+apps/web/.tsupgrader/
 
 # Environment files
 .env

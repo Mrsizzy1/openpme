@@ -5,8 +5,9 @@
   "scripts": {
     "start": "ts-node src/main.ts",
     "start:dev": "ts-node src/main.ts",
+    "start:prod": "node dist/main.js",
     "build": "tsc",
-    "test": "node -r ts-node/register --test test/auth-security.spec.ts test/multi-currency.spec.ts test/product-permissions.spec.ts test/remote-control.spec.ts test/bank-dossier.spec.ts test/offline-stock-sync.spec.ts"
+    "test": "node -r ts-node/register --test test/auth-security.spec.ts test/multi-currency.spec.ts test/product-permissions.spec.ts test/remote-control.spec.ts test/bank-dossier.spec.ts test/offline-stock-sync.spec.ts test/sales-stock.spec.ts test/mobile-money-safety.spec.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

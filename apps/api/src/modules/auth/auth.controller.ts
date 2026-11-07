@@ -7,6 +7,16 @@ import { LoginDto, RegisterOrganizationDto } from './auth.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
+/**
+ * Cookie de session réservé au HTTPS en production. COOKIE_SECURE=false permet une
+ * installation en réseau local sans HTTPS (le cookie circule alors en clair sur le réseau).
+ */
+function isSecureCookie(): boolean {
+  if (process.env.COOKIE_SECURE === 'true') return true;
+  if (process.env.COOKIE_SECURE === 'false') return false;
+  return process.env.NODE_ENV === 'production';
+}
+
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
@@ -24,7 +34,7 @@ export class AuthController {
   private setRefreshCookie(response: Response, token: string) {
     response.cookie('smart_pme_refresh', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isSecureCookie(),
       sameSite: 'lax',
       path: '/api/v1/auth',
       maxAge: 30 * 24 * 60 * 60 * 1000,
@@ -34,7 +44,7 @@ export class AuthController {
   private clearRefreshCookie(response: Response) {
     response.clearCookie('smart_pme_refresh', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isSecureCookie(),
       sameSite: 'lax',
       path: '/api/v1/auth',
     });

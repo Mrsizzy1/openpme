@@ -1,0 +1,20 @@
+# Keep the Docker build context small and free of secrets.
+**/node_modules
+**/dist
+**/build
+**/*.tsbuildinfo
+**/*.log
+.git
+.github
+.vscode
+.idea
+.venv
+.env
+.env.*
+!.env.example
+build_desktop
+dist_desktop
+apps/desktop-py
+apps/web/.tsupgrader
+docs
+*.spec

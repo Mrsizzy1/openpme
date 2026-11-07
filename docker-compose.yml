@@ -7,8 +7,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-smart_pme_finance}
+    # Accessible uniquement depuis la machine hôte (sauvegardes, administration), jamais depuis le réseau.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -29,6 +30,11 @@ services:
       NODE_ENV: production
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      # Trust nginx (private Docker network) so rate limits and audit logs see the real client IP.
+      TRUST_PROXY: ${TRUST_PROXY:-loopback, uniquelocal}
+      # Laisser vide en HTTPS. "false" uniquement pour un réseau local sans HTTPS.
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
     ports:
       - "3001:3001"
     depends_on:
@@ -42,7 +48,7 @@ services:
     container_name: openpme_web
     restart: always
     ports:
-      - "5173:80"
+      - "5173:8080"
     depends_on:
       - api
 

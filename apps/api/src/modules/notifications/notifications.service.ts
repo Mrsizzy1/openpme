@@ -27,6 +27,59 @@ export class NotificationsService {
   constructor(private prisma: PrismaService) {}
 
   /**
+   * Synthèse réelle d'une journée pour une organisation (heure de Kinshasa, UTC+1).
+   * `date` au format AAAA-MM-JJ ; par défaut, la journée en cours.
+   */
+  async buildDailySummary(organizationId: string, date?: string): Promise<DailySummaryData> {
+    const KINSHASA_OFFSET_MS = 60 * 60 * 1000;
+    const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? date
+      : new Date(Date.now() + KINSHASA_OFFSET_MS).toISOString().slice(0, 10);
+    const start = new Date(new Date(`${day}T00:00:00.000Z`).getTime() - KINSHASA_OFFSET_MS);
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    const range = { gte: start, lt: end };
+
+    const [organization, sales, expenses, closedSessions, activeAnomaliesCount] = await Promise.all([
+      this.prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
+      this.prisma.sale.groupBy({
+        by: ['currency'],
+        where: { organizationId, createdAt: range, status: { not: 'CANCELLED' } },
+        _sum: { total: true },
+        _count: { _all: true },
+      }),
+      this.prisma.expense.groupBy({
+        by: ['currency'],
+        where: { organizationId, date: range },
+        _sum: { amount: true },
+      }),
+      this.prisma.cashSession.groupBy({
+        by: ['currency'],
+        where: { organizationId, closedAt: range },
+        _sum: { difference: true },
+      }),
+      this.prisma.anomalyAlert.count({
+        where: { organizationId, status: { in: ['DETECTED', 'UNDER_REVIEW'] } },
+      }),
+    ]);
+
+    const sumFor = (rows: any[], currency: 'CDF' | 'USD', field: 'total' | 'amount' | 'difference') =>
+      Number(rows.find((row) => row.currency === currency)?._sum?.[field] ?? 0);
+
+    return {
+      organizationName: organization?.name ?? '—',
+      date: new Date(`${day}T12:00:00.000Z`).toLocaleDateString('fr-FR', { timeZone: 'UTC' }),
+      totalSalesCDF: sumFor(sales, 'CDF', 'total'),
+      totalSalesUSD: sumFor(sales, 'USD', 'total'),
+      salesCount: sales.reduce((count, row) => count + row._count._all, 0),
+      totalExpensesCDF: sumFor(expenses, 'CDF', 'amount'),
+      totalExpensesUSD: sumFor(expenses, 'USD', 'amount'),
+      cashDiscrepancyCDF: sumFor(closedSessions, 'CDF', 'difference'),
+      cashDiscrepancyUSD: sumFor(closedSessions, 'USD', 'difference'),
+      activeAnomaliesCount,
+    };
+  }
+
+  /**
    * Formate un rapport de synthèse journalière pour WhatsApp ou Telegram
    */
   formatDailyReport(data: DailySummaryData): string {
@@ -35,14 +88,18 @@ export class NotificationsService {
       `🏢 *Entreprise :* ${data.organizationName}\n` +
       `📅 *Date :* ${data.date}\n` +
       `--------------------------------\n` +
-      `🛒 *Ventes Réalisées :* ${data.salesCount} transactions\n` +
-      `💵 *Chiffre d'Affaires USD :* $${data.totalSalesUSD.toLocaleString('fr-FR')}\n` +
-      `💵 *Chiffre d'Affaires CDF :* ${data.totalSalesCDF.toLocaleString('fr-FR')} CDF\n\n` +
-      `📉 *Dépenses & Sorties :* $${data.totalExpensesUSD} / ${data.totalExpensesCDF} CDF\n` +
-      `⚠️ *Écart de Caisse Constaté :* ${data.cashDiscrepancyCDF !== 0 || data.cashDiscrepancyUSD !== 0 ? 'ANORMAL' : 'AUCUN (0 $)'}\n` +
-      `🛡️ *Anomalies en Attente :* ${data.activeAnomaliesCount}\n` +
+      `🛒 *Ventes :* ${data.salesCount} transaction(s)\n` +
+      `💵 *Chiffre d'affaires CDF :* ${data.totalSalesCDF.toLocaleString('fr-FR')} CDF\n` +
+      `💵 *Chiffre d'affaires USD :* ${data.totalSalesUSD.toLocaleString('fr-FR')} USD\n\n` +
+      `📉 *Dépenses :* ${data.totalExpensesCDF.toLocaleString('fr-FR')} CDF / ${data.totalExpensesUSD.toLocaleString('fr-FR')} USD\n` +
+      `⚠️ *Écart de caisse (sessions clôturées) :* ${
+        data.cashDiscrepancyCDF === 0 && data.cashDiscrepancyUSD === 0
+          ? 'aucun'
+          : `${data.cashDiscrepancyCDF.toLocaleString('fr-FR')} CDF / ${data.cashDiscrepancyUSD.toLocaleString('fr-FR')} USD`
+      }\n` +
+      `🛡️ *Anomalies en attente :* ${data.activeAnomaliesCount}\n` +
       `--------------------------------\n` +
-      `_Généré automatiquement par Smart PME Finance._`
+      `_Généré par Smart PME Finance._`
     );
   }
 

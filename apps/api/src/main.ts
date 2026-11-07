@@ -12,6 +12,18 @@ async function bootstrap() {
   const corsOrigins = getCorsOrigins();
   const app = await NestFactory.create(AppModule);
 
+  // Behind a reverse proxy (nginx in docker-compose), trust it so that req.ip is the
+  // real client address. Otherwise every user shares the proxy's IP and the login
+  // rate limit (5 attempts / 15 min) would apply to the whole company at once.
+  const trustProxy = process.env.TRUST_PROXY?.trim();
+  if (trustProxy && trustProxy !== 'false') {
+    const hops = Number(trustProxy);
+    app.getHttpAdapter().getInstance().set(
+      'trust proxy',
+      trustProxy === 'true' ? true : Number.isInteger(hops) ? hops : trustProxy,
+    );
+  }
+
   app.use(cookieParser());
   app.use(helmet({
     contentSecurityPolicy: {
@@ -56,15 +68,20 @@ async function bootstrap() {
     .addBearerAuth()
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  // La documentation interactive expose toute la surface de l'API : désactivée en production
+  // sauf demande explicite (SWAGGER_ENABLED=true).
+  const swaggerEnabled = process.env.NODE_ENV !== 'production' || process.env.SWAGGER_ENABLED === 'true';
+  if (swaggerEnabled) {
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const port = process.env.PORT || 3001;
   await app.listen(port);
   console.log(`====================================================`);
   console.log(`🚀 Smart PME Finance API is running on port ${port}`);
   console.log(`📡 Base API URL: http://localhost:${port}/api/v1`);
-  console.log(`📚 Swagger Documentation: http://localhost:${port}/api/docs`);
+  if (swaggerEnabled) console.log(`📚 Swagger Documentation: http://localhost:${port}/api/docs`);
   console.log(`====================================================`);
 }
 

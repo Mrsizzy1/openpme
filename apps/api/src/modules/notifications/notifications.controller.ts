@@ -18,7 +18,7 @@ export class NotificationsController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER)
   @ApiOperation({ summary: 'Tester la liaison d\'un bot Telegram pour les alertes du gérant' })
   async testTelegram(@Body() body: { botToken: string; chatId: string }) {
-    const text = '🔔 *Smart PME Finance* : Test de liaison réussi ! Vous recevrez ici les alertes de caisse et les clôtures journalières.';
+    const text = '🔔 *Smart PME Finance* : Test de liaison réussi. Les rapports de clôture envoyés depuis Smart PME Finance arriveront ici.';
     return this.notificationsService.sendTelegramMessage(body.botToken, body.chatId, text);
   }
 
@@ -34,19 +34,8 @@ export class NotificationsController {
       telegramChatId?: string;
     },
   ) {
-    // Synthèse de démonstration pour le rapport journalier
-    const summaryData = {
-      organizationName: 'PME Commerciale SARL',
-      date: body.date || new Date().toLocaleDateString('fr-FR'),
-      totalSalesCDF: 1450000,
-      totalSalesUSD: 850,
-      salesCount: 18,
-      totalExpensesCDF: 120000,
-      totalExpensesUSD: 50,
-      cashDiscrepancyCDF: 0,
-      cashDiscrepancyUSD: 0,
-      activeAnomaliesCount: 0,
-    };
+    // Chiffres réels de la journée, calculés depuis la base de l'organisation.
+    const summaryData = await this.notificationsService.buildDailySummary(orgId, body.date);
 
     const text = this.notificationsService.formatDailyReport(summaryData);
 
