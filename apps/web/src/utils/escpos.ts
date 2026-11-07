@@ -1,3 +1,4 @@
+import { notify } from '../lib/notify';
 /**
  * Smart PME Finance - Pilote d'Impression Thermique ESC/POS Direct (58mm & 80mm)
  * Supporte le découpage papier, l'éjection de tiroir-caisse et le rendu thermique haute densité.
@@ -134,7 +135,7 @@ export function printThermalReceiptWeb(data: ReceiptData, options: { width?: '80
 
   const printWindow = window.open('', '_blank', 'width=400,height=600');
   if (!printWindow) {
-    alert("Veuillez autoriser l'ouverture des popups pour imprimer le ticket.");
+    notify.warning("Autorisez l'ouverture des fenêtres pop-up pour imprimer le ticket.", { title: 'Impression bloquée' });
     return;
   }
 
@@ -253,7 +254,7 @@ export function printThermalReceiptWeb(data: ReceiptData, options: { width?: '80
 
       <div class="center" style="font-size: 10px; margin-top: 8px;">
         <div class="bold">MERCI DE VOTRE VISITE !</div>
-        <div style="font-size: 9px; color: #555; margin-top: 2px;">Smart PME Finance - Conforme DGI/OHADA</div>
+        <div style="font-size: 9px; color: #555; margin-top: 2px;">Smart PME Finance</div>
       </div>
 
       <script>

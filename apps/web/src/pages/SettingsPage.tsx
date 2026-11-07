@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
-import { Building2, Save, DollarSign, Sliders, ShieldAlert, FileText, AlertTriangle, CheckCircle, Bell, MessageSquare, Send } from 'lucide-react';
+import { Building2, Save, Landmark, ShieldAlert, FileText, Bell, MessageSquare, Send } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { Alert, Button, Field, SectionCard } from '../components/ui';
+import { formatDate, formatNumber } from '../lib/format';
+import './SettingsPage.css';
 
 export const SettingsPage: React.FC = () => {
   const { organization, refreshProfile } = useAuth();
@@ -88,11 +91,11 @@ export const SettingsPage: React.FC = () => {
       });
 
       if (res.telegramSent) {
-        success('Rapport de synthèse transmis sur Telegram !');
+        success('Rapport du jour envoyé sur Telegram.');
       }
       if (res.whatsappUrl) {
         window.open(res.whatsappUrl, '_blank');
-        success('Aperçu du rapport ouvert pour WhatsApp.');
+        success('Rapport du jour prêt à envoyer dans WhatsApp.');
       }
     } catch (err: any) {
       toastError(err.message || 'Erreur lors de la génération du rapport.');
@@ -194,324 +197,263 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const SectionTitle: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon, label }) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', paddingBottom: '10px', borderBottom: '1px solid #E2E8F0' }}>
-      <div style={{ color: '#2563EB', display: 'flex' }}>{icon}</div>
-      <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#111827' }}>{label}</h3>
-    </div>
-  );
-
   return (
-    <div>
+    <form className="page settings-page" onSubmit={handleSaveAll}>
       {formError && (
-        <div className="alert alert-danger" style={{ marginBottom: '20px' }}>
-          <AlertTriangle size={15} className="alert-icon" />
-          <span>{formError}</span>
-        </div>
+        <Alert tone="danger" title="Enregistrement impossible" onDismiss={() => setFormError(null)}>
+          {formError}
+        </Alert>
       )}
 
-      <form onSubmit={handleSaveAll}>
-        {/* ── Section 1 : Identité de l'entreprise ── */}
-        <div className="card" style={{ marginBottom: '20px' }}>
-          <div className="card-body">
-            <SectionTitle icon={<Building2 size={16} />} label="Identité de l'entreprise" />
-            <div className="form-grid">
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-name">
-                  Nom commercial <span className="required">*</span>
-                </label>
-                <input id="set-name" type="text" required className="input-field"
-                  placeholder="ex : Commerce DIALLO SARL" value={name}
-                  onChange={(e) => setName(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-legal">Dénomination légale</label>
-                <input id="set-legal" type="text" className="input-field"
-                  placeholder="Raison sociale officielle" value={legalName}
-                  onChange={(e) => setLegalName(e.target.value)} />
-              </div>
-            </div>
+      <SectionCard
+        title="Identité de l’entreprise"
+        description="Ces informations apparaissent sur vos factures et documents officiels."
+        icon={Building2}
+      >
+        <div className="form-grid">
+          <Field label="Nom commercial" required htmlFor="set-name">
+            <input id="set-name" type="text" required className="input-field"
+              placeholder="Ex. Commerce Diallo SARL" value={name}
+              onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="Dénomination légale" htmlFor="set-legal">
+            <input id="set-legal" type="text" className="input-field"
+              placeholder="Raison sociale officielle" value={legalName}
+              onChange={(e) => setLegalName(e.target.value)} />
+          </Field>
+        </div>
 
-            <div className="form-grid-3">
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-taxid">NIF (Numéro fiscal)</label>
-                <input id="set-taxid" type="text" className="input-field"
-                  placeholder="A0000000X" value={taxId}
-                  onChange={(e) => setTaxId(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-rccm">N° RCCM</label>
-                <input id="set-rccm" type="text" className="input-field"
-                  placeholder="CD/KIN/RCCM/..." value={rccm}
-                  onChange={(e) => setRccm(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-idnat">Identifiant National</label>
-                <input id="set-idnat" type="text" className="input-field"
-                  placeholder="ID NAT" value={idNat}
-                  onChange={(e) => setIdNat(e.target.value)} />
-              </div>
-            </div>
+        <div className="form-grid-3">
+          <Field label="NIF (numéro fiscal)" htmlFor="set-taxid">
+            <input id="set-taxid" type="text" className="input-field"
+              placeholder="A0000000X" value={taxId}
+              onChange={(e) => setTaxId(e.target.value)} />
+          </Field>
+          <Field label="N° RCCM" htmlFor="set-rccm">
+            <input id="set-rccm" type="text" className="input-field"
+              placeholder="CD/KIN/RCCM/…" value={rccm}
+              onChange={(e) => setRccm(e.target.value)} />
+          </Field>
+          <Field label="Identifiant national" htmlFor="set-idnat">
+            <input id="set-idnat" type="text" className="input-field"
+              placeholder="ID NAT" value={idNat}
+              onChange={(e) => setIdNat(e.target.value)} />
+          </Field>
+        </div>
 
-            <div className="form-grid">
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-phone">Téléphone</label>
-                <input id="set-phone" type="tel" className="input-field"
-                  placeholder="+243 8X XXX XXXX" value={phone}
-                  onChange={(e) => setPhone(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-email">E-mail</label>
-                <input id="set-email" type="email" className="input-field"
-                  placeholder="contact@monentreprise.cd" value={email}
-                  onChange={(e) => setEmail(e.target.value)} />
-              </div>
-            </div>
+        <div className="form-grid">
+          <Field label="Téléphone" htmlFor="set-phone">
+            <input id="set-phone" type="tel" className="input-field"
+              placeholder="+243 8X XXX XXXX" value={phone}
+              onChange={(e) => setPhone(e.target.value)} />
+          </Field>
+          <Field label="E-mail" htmlFor="set-email">
+            <input id="set-email" type="email" className="input-field"
+              placeholder="contact@monentreprise.cd" value={email}
+              onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+        </div>
 
-            <div className="form-grid">
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-address">Adresse physique</label>
-                <input id="set-address" type="text" className="input-field"
-                  placeholder="Avenue, N°, Commune" value={address}
-                  onChange={(e) => setAddress(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-city">Ville</label>
-                <input id="set-city" type="text" className="input-field"
-                  placeholder="Kinshasa" value={city}
-                  onChange={(e) => setCity(e.target.value)} />
-              </div>
+        <div className="form-grid">
+          <Field label="Adresse" htmlFor="set-address" className="mb-0">
+            <input id="set-address" type="text" className="input-field"
+              placeholder="Avenue, numéro, commune" value={address}
+              onChange={(e) => setAddress(e.target.value)} />
+          </Field>
+          <Field label="Ville" htmlFor="set-city" className="mb-0">
+            <input id="set-city" type="text" className="input-field"
+              placeholder="Kinshasa" value={city}
+              onChange={(e) => setCity(e.target.value)} />
+          </Field>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Devises et fiscalité"
+        description="Le taux du jour s’applique immédiatement à toutes les caisses."
+        icon={Landmark}
+      >
+        <div className="form-grid-3">
+          <Field label="Devise principale" htmlFor="set-curr">
+            <select id="set-curr" className="select-field" value={primaryCurrency}
+              onChange={(e) => {
+                const value = e.target.value;
+                setPrimaryCurrency(value);
+                if (value === secondaryCurrency) setSecondaryCurrency(value === 'CDF' ? 'USD' : 'CDF');
+              }}>
+              <option value="CDF">CDF — Franc congolais</option>
+              <option value="USD">USD — Dollar américain</option>
+            </select>
+          </Field>
+          <Field label="Devise secondaire" htmlFor="set-curr2">
+            <select id="set-curr2" className="select-field" value={secondaryCurrency}
+              onChange={(e) => setSecondaryCurrency(e.target.value)}>
+              <option value="USD">USD — Dollar américain</option>
+              <option value="CDF">CDF — Franc congolais</option>
+            </select>
+          </Field>
+          <Field label="Taux du jour (1 USD)" required htmlFor="set-rate" hint="Enregistré dans l’historique journalier des taux.">
+            <div className="input-addon">
+              <input id="set-rate" type="number" min="0.0001" step="0.0001" required className="input-field"
+                value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+              <span className="input-addon-text">CDF</span>
             </div>
+          </Field>
+        </div>
+
+        {rateHistory.length > 0 && (
+          <div className="settings-rates">
+            <span className="settings-rates-label">Derniers taux</span>
+            {rateHistory.slice(0, 5).map((rate, index) => (
+              <span key={rate.id ?? index} className="settings-rate">
+                {formatDate(rate.effectiveDate)} · <strong>{formatNumber(Number(rate.rate))} CDF</strong>
+              </span>
+            ))}
           </div>
+        )}
+
+        <div className="form-grid">
+          <Field label="TVA" htmlFor="set-tax">
+            <label className="settings-check">
+              <input type="checkbox" id="set-tax" checked={enableTax}
+                onChange={(e) => setEnableTax(e.target.checked)} />
+              Appliquer la TVA sur les ventes
+            </label>
+          </Field>
+          <Field label="Taux de TVA" htmlFor="set-taxrate">
+            <div className="input-addon">
+              <input id="set-taxrate" type="number" min="0" max="100" step="0.1"
+                className="input-field" value={taxRatePercent} disabled={!enableTax}
+                onChange={(e) => setTaxRatePercent(e.target.value)} />
+              <span className="input-addon-text">%</span>
+            </div>
+          </Field>
         </div>
 
-        {/* ── Section 2 : Paramètres financiers ── */}
-        <div className="card" style={{ marginBottom: '20px' }}>
-          <div className="card-body">
-            <SectionTitle icon={<DollarSign size={16} />} label="Devise & Fiscalité" />
-            <div className="form-grid-3">
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-curr">Devise principale</label>
-                <select id="set-curr" className="input-field" value={primaryCurrency}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setPrimaryCurrency(value);
-                    if (value === secondaryCurrency) setSecondaryCurrency(value === 'CDF' ? 'USD' : 'CDF');
-                  }}>
-                  <option value="CDF">CDF — Franc Congolais</option>
-                  <option value="USD">USD — Dollar américain</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-curr2">Devise secondaire</label>
-                <select id="set-curr2" className="input-field" value={secondaryCurrency}
-                  onChange={(e) => setSecondaryCurrency(e.target.value)}>
-                  <option value="USD">USD — Dollar américain</option>
-                  <option value="CDF">CDF — Franc Congolais</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-rate">
-                  Taux 1 USD → CDF <span className="required">*</span>
-                </label>
-                <input id="set-rate" type="number" min="0.0001" step="0.0001" required className="input-field"
-                  value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
-                <div className="form-hint">Le taux est enregistré dans l’historique journalier de l’entreprise.</div>
-                {rateHistory.length > 0 && (
-                  <div className="form-hint" style={{ marginTop: '6px' }}>
-                    Derniers taux : {rateHistory.slice(0, 5).map((rate) =>
-                      `${new Date(rate.effectiveDate).toLocaleDateString('fr-FR')} : ${rate.rate} CDF`,
-                    ).join(' · ')}
-                  </div>
-                )}
-              </div>
-            </div>
+        <Field label="Préfixe de numérotation des factures" htmlFor="set-prefix" hint="Ex. : FAC- donne FAC-000001 ; FAC-2026- donne FAC-2026-000001." className="mb-0">
+          <input id="set-prefix" type="text" className="input-field settings-prefix"
+            placeholder="FAC-" value={invoicePrefix}
+            onChange={(e) => setInvoicePrefix(e.target.value)} />
+        </Field>
+      </SectionCard>
 
-            <div className="form-grid">
-              <div className="form-group">
-                <label className="form-label">TVA applicable</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                  <input type="checkbox" id="set-tax" checked={enableTax}
-                    onChange={(e) => setEnableTax(e.target.checked)}
-                    style={{ width: '14px', height: '14px', cursor: 'pointer' }} />
-                  <label htmlFor="set-tax" style={{ fontSize: '0.8125rem', color: '#374151', cursor: 'pointer' }}>
-                    Activer la TVA sur les ventes
-                  </label>
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-taxrate">Taux TVA (%)</label>
-                <input id="set-taxrate" type="number" min="0" max="100" step="0.1"
-                  className="input-field" value={taxRatePercent} disabled={!enableTax}
-                  onChange={(e) => setTaxRatePercent(e.target.value)} />
-              </div>
+      <SectionCard
+        title="Seuils de détection des anomalies"
+        description="Au-delà de ces seuils, une alerte est créée automatiquement."
+        icon={ShieldAlert}
+        iconTone="warning"
+      >
+        <div className="form-grid-3">
+          <Field label="Remise maximale autorisée" htmlFor="set-disc" hint="Au-delà, une anomalie est créée." className="mb-0">
+            <div className="input-addon">
+              <input id="set-disc" type="number" min="0" max="100" step="0.5"
+                className="input-field" value={alertMaxDiscount}
+                onChange={(e) => setAlertMaxDiscount(e.target.value)} />
+              <span className="input-addon-text">%</span>
             </div>
+          </Field>
+          <Field label="Seuil de dépense importante" htmlFor="set-exp" hint="Montant d’une dépense unique déclenchant une alerte." className="mb-0">
+            <div className="input-addon">
+              <input id="set-exp" type="number" min="0" step="1000"
+                className="input-field" value={alertLargeExpense}
+                onChange={(e) => setAlertLargeExpense(e.target.value)} />
+              <span className="input-addon-text">CDF</span>
+            </div>
+          </Field>
+          <Field label="Écart de caisse toléré" htmlFor="set-cash" hint="Écart entre le montant compté et le théorique." className="mb-0">
+            <div className="input-addon">
+              <input id="set-cash" type="number" min="0" step="100"
+                className="input-field" value={alertCashDiscrepancy}
+                onChange={(e) => setAlertCashDiscrepancy(e.target.value)} />
+              <span className="input-addon-text">CDF</span>
+            </div>
+          </Field>
+        </div>
+      </SectionCard>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="set-prefix">Préfixe de numérotation des factures</label>
-              <input id="set-prefix" type="text" className="input-field"
-                placeholder="FAC-" value={invoicePrefix}
-                onChange={(e) => setInvoicePrefix(e.target.value)} />
-              <div className="form-hint">Ex. : FAC- → FAC-000001, FAC-2026- → FAC-2026-000001</div>
-            </div>
+      <SectionCard
+        title="Mentions légales et coordonnées bancaires"
+        description="Imprimées en pied de facture."
+        icon={FileText}
+      >
+        <Field label="Pied de facture" htmlFor="set-footer">
+          <textarea
+            id="set-footer"
+            rows={2}
+            className="input-field"
+            placeholder="Ex. : Tout retard de paiement entraîne des pénalités de 2 % par mois."
+            value={invoiceFooterNote}
+            onChange={(e) => setInvoiceFooterNote(e.target.value)}
+          />
+        </Field>
+        <Field label="Coordonnées bancaires" htmlFor="set-bank" className="mb-0">
+          <textarea
+            id="set-bank"
+            rows={2}
+            className="input-field"
+            placeholder="Ex. : Rawbank Kinshasa — IBAN : CD… — SWIFT : …"
+            value={bankDetails}
+            onChange={(e) => setBankDetails(e.target.value)}
+          />
+        </Field>
+      </SectionCard>
+
+      <SectionCard
+        title="Rapport du dirigeant"
+        description="Envoyez à la demande le rapport de clôture du jour (ventes, dépenses, écarts de caisse, anomalies) sur Telegram ou WhatsApp. Ces coordonnées sont enregistrées sur ce poste uniquement."
+        icon={Bell}
+        footer={(
+          <div className="settings-test-actions">
+            <Button icon={<Send size={14} />} onClick={handleTestTelegram} loading={testingTelegram} loadingText="Test en cours…">
+              Tester le bot Telegram
+            </Button>
+            <Button icon={<MessageSquare size={14} />} onClick={handleTestDailyReport} loading={testingReport} loadingText="Génération…">
+              Envoyer le rapport du jour
+            </Button>
           </div>
+        )}
+      >
+        <div className="form-grid-3">
+          <Field label="Numéro WhatsApp du dirigeant" htmlFor="set-wa" hint="Format international, ex. +243812345678." className="mb-0">
+            <input
+              id="set-wa"
+              type="tel"
+              className="input-field"
+              placeholder="+243…"
+              value={managerWhatsapp}
+              onChange={(e) => setManagerWhatsapp(e.target.value)}
+            />
+          </Field>
+          <Field label="Jeton du bot Telegram" htmlFor="set-tg-token" hint="Fourni par @BotFather sur Telegram." className="mb-0">
+            <input
+              id="set-tg-token"
+              type="password"
+              autoComplete="off"
+              className="input-field"
+              placeholder="123456789:ABC…"
+              value={telegramBotToken}
+              onChange={(e) => setTelegramBotToken(e.target.value)}
+            />
+          </Field>
+          <Field label="Identifiant du chat ou du canal" htmlFor="set-tg-chat" hint="Votre compte ou le groupe de direction." className="mb-0">
+            <input
+              id="set-tg-chat"
+              type="text"
+              className="input-field"
+              placeholder="987654321 ou @mon_canal"
+              value={telegramChatId}
+              onChange={(e) => setTelegramChatId(e.target.value)}
+            />
+          </Field>
         </div>
+      </SectionCard>
 
-        {/* ── Section 3 : Seuils d'alerte ── */}
-        <div className="card" style={{ marginBottom: '20px' }}>
-          <div className="card-body">
-            <SectionTitle icon={<ShieldAlert size={16} />} label="Seuils de détection des anomalies" />
-            <div className="form-grid-3">
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-disc">Remise maximale autorisée (%)</label>
-                <input id="set-disc" type="number" min="0" max="100" step="0.5"
-                  className="input-field" value={alertMaxDiscount}
-                  onChange={(e) => setAlertMaxDiscount(e.target.value)} />
-                <div className="form-hint">Au-delà, une anomalie est créée automatiquement.</div>
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-exp">Seuil grande dépense (CDF)</label>
-                <input id="set-exp" type="number" min="0" step="1000"
-                  className="input-field" value={alertLargeExpense}
-                  onChange={(e) => setAlertLargeExpense(e.target.value)} />
-                <div className="form-hint">Dépense unique au-delà de ce montant → alerte.</div>
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-cash">Écart de caisse toléré (CDF)</label>
-                <input id="set-cash" type="number" min="0" step="100"
-                  className="input-field" value={alertCashDiscrepancy}
-                  onChange={(e) => setAlertCashDiscrepancy(e.target.value)} />
-                <div className="form-hint">Écart comptant/théorique déclenchant une alerte.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Section 4 : Mentions légales ── */}
-        <div className="card" style={{ marginBottom: '24px' }}>
-          <div className="card-body">
-            <SectionTitle icon={<FileText size={16} />} label="Mentions légales & coordonnées bancaires" />
-            <div className="form-group">
-              <label className="form-label" htmlFor="set-footer">Pied de facture</label>
-              <textarea
-                id="set-footer"
-                rows={2}
-                className="input-field"
-                placeholder="ex : Facture certifiée conforme — RDC. Tout retard de paiement entraîne des pénalités de 2% par mois."
-                value={invoiceFooterNote}
-                onChange={(e) => setInvoiceFooterNote(e.target.value)}
-                style={{ resize: 'vertical' }}
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label" htmlFor="set-bank">Coordonnées bancaires</label>
-              <textarea
-                id="set-bank"
-                rows={2}
-                className="input-field"
-                placeholder="ex : Rawbank Kinshasa — IBAN : CD... — SWIFT : ..."
-                value={bankDetails}
-                onChange={(e) => setBankDetails(e.target.value)}
-                style={{ resize: 'vertical' }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* ── Section 5 : Alertes Dirigeant WhatsApp & Telegram ── */}
-        <div className="card" style={{ marginBottom: '24px' }}>
-          <div className="card-body">
-            <SectionTitle icon={<Bell size={16} />} label="Alertes instantanées Dirigeant & Clôture WhatsApp / Telegram" />
-            
-            <p style={{ fontSize: '0.8125rem', color: '#6B7280', marginBottom: '16px' }}>
-              Recevez les alertes en cas de fraude, d'écart de caisse ou de fermeture d'urgence (Killswitch), ainsi que le rapport de clôture automatique à 20h00 directement sur votre smartphone.
-            </p>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-wa">N° WhatsApp du Gérant / Propriétaire</label>
-                <input
-                  id="set-wa"
-                  type="tel"
-                  className="input-field"
-                  placeholder="ex : +243812345678"
-                  value={managerWhatsapp}
-                  onChange={(e) => setManagerWhatsapp(e.target.value)}
-                />
-                <div className="form-hint">Format international avec indicatif pays (+243...)</div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-tg-token">Telegram Bot Token (Optionnel)</label>
-                <input
-                  id="set-tg-token"
-                  type="text"
-                  className="input-field"
-                  placeholder="ex : 123456789:ABCdefGhIJKlmNoPQRstuVWXyz"
-                  value={telegramBotToken}
-                  onChange={(e) => setTelegramBotToken(e.target.value)}
-                />
-                <div className="form-hint">Créé via @BotFather sur Telegram</div>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="set-tg-chat">Telegram Chat ID / Canal Privé</label>
-                <input
-                  id="set-tg-chat"
-                  type="text"
-                  className="input-field"
-                  placeholder="ex : 987654321 ou @mon_canal_pme"
-                  value={telegramChatId}
-                  onChange={(e) => setTelegramChatId(e.target.value)}
-                />
-                <div className="form-hint">ID de votre compte ou de votre groupe de direction</div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
-                <button
-                  type="button"
-                  onClick={handleTestTelegram}
-                  disabled={testingTelegram}
-                  className="btn btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  <Send size={14} />
-                  {testingTelegram ? 'Test en cours...' : 'Tester le Bot Telegram'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleTestDailyReport}
-                  disabled={testingReport}
-                  className="btn btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  <MessageSquare size={14} />
-                  {testingReport ? 'Génération...' : 'Aperçu Clôture WhatsApp'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bouton enregistrer */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-          <button type="submit" disabled={saving} className="btn btn-primary btn-lg">
-            {saving ? (
-              <>
-                <span className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
-                Enregistrement...
-              </>
-            ) : (
-              <>
-                <Save size={16} />
-                Enregistrer les paramètres
-              </>
-            )}
-          </button>
-        </div>
-      </form>
-    </div>
+      <div className="settings-savebar">
+        <span className="settings-savebar-text">Les modifications s’appliquent à tous les postes après l’enregistrement.</span>
+        <Button type="submit" variant="primary" icon={<Save size={15} />} loading={saving} loadingText="Enregistrement…">
+          Enregistrer les paramètres
+        </Button>
+      </div>
+    </form>
   );
 };

@@ -1,31 +1,40 @@
-import React, { useEffect, useState } from 'react';
-import { ApiClient } from '../api/client';
+import React, { useEffect, useRef, useState } from 'react';
 import { formatCurrency } from '@smart-pme/shared';
-import { Receipt, Printer, CreditCard, X, AlertTriangle, RefreshCw, CheckCircle, FileSpreadsheet, Share2 } from 'lucide-react';
+import { Receipt, Printer, CreditCard, RefreshCw, CheckCircle, FileSpreadsheet, Share2, ListChecks, Eye } from 'lucide-react';
+import { ApiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { exportToCsv } from '../utils/exportCsv';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { printThermalReceiptWeb } from '../utils/escpos';
 import { isNetworkFailure, offlineSync } from '../services/offlineSync';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  IconButton,
+  Modal,
+  PageToolbar,
+  Spinner,
+  StatusBadge,
+  TableSkeleton,
+} from '../components/ui';
+import { formatDate } from '../lib/format';
+import { INVOICE_STATUS, getStatusMeta } from '../lib/status';
+import './InvoicesPage.css';
 
-const statusLabels: Record<string, string> = {
-  PAID: 'Payée',
-  PARTIALLY_PAID: 'Partielle',
-  ISSUED: 'Émise',
-  OVERDUE: 'En retard',
-  CANCELLED: 'Annulée',
-  DRAFT: 'Brouillon',
-};
+const FILTER_OPTIONS = [
+  { value: '', label: 'Toutes' },
+  { value: 'ISSUED', label: 'Émises' },
+  { value: 'PARTIALLY_PAID', label: 'Partielles' },
+  { value: 'OVERDUE', label: 'En retard' },
+  { value: 'PAID', label: 'Payées' },
+  { value: 'CANCELLED', label: 'Annulées' },
+];
 
-const statusClass: Record<string, string> = {
-  PAID: 'badge-success',
-  PARTIALLY_PAID: 'badge-warning',
-  ISSUED: 'badge-info',
-  OVERDUE: 'badge-danger',
-  CANCELLED: 'badge-neutral',
-  DRAFT: 'badge-neutral',
-};
+const statusLabel = (status: string) => getStatusMeta(INVOICE_STATUS, status).label;
 
 export const InvoicesPage: React.FC = () => {
   const { organization } = useAuth();
@@ -33,7 +42,9 @@ export const InvoicesPage: React.FC = () => {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const hasLoadedOnce = useRef(false);
 
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
 
@@ -49,14 +60,17 @@ export const InvoicesPage: React.FC = () => {
 
   const loadInvoices = async () => {
     try {
-      setLoading(true);
+      if (hasLoadedOnce.current) setRefreshing(true);
+      else setLoading(true);
       setLoadError(null);
       const res = await ApiClient.getInvoices(statusFilter || undefined);
       setInvoices(res);
+      hasLoadedOnce.current = true;
     } catch (err: any) {
       setLoadError(err.message || 'Impossible de charger les factures.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -156,11 +170,11 @@ export const InvoicesPage: React.FC = () => {
           try {
             await offlineSync.enqueuePayment(paymentPayload);
             setPaymentInvoice(null);
-            success(`Règlement de ${formatCurrency(amt, paymentInvoice.currency)} enregistré hors-ligne. Il sera synchronisé dès le retour du réseau.`);
+            success(`Règlement de ${formatCurrency(amt, paymentInvoice.currency)} enregistré hors ligne. Il sera synchronisé dès le retour du réseau.`);
           } catch (storageError) {
             setPaymentError(storageError instanceof Error
               ? `Le règlement n’a pas été enregistré. ${storageError.message}`
-              : 'Le règlement n’a pas été enregistré : stockage hors-ligne indisponible.');
+              : 'Le règlement n’a pas été enregistré : stockage hors ligne indisponible.');
           }
         }
       } else {
@@ -171,15 +185,6 @@ export const InvoicesPage: React.FC = () => {
     }
   };
 
-  const filterOptions = [
-    { value: '', label: 'Toutes' },
-    { value: 'ISSUED', label: 'Émises' },
-    { value: 'PARTIALLY_PAID', label: 'Partielles' },
-    { value: 'OVERDUE', label: 'En retard' },
-    { value: 'PAID', label: 'Payées' },
-    { value: 'CANCELLED', label: 'Annulées' },
-  ];
-
   const handleExportInvoices = () => {
     if (!invoices.length) {
       toastError('Aucune facture à exporter.');
@@ -189,7 +194,7 @@ export const InvoicesPage: React.FC = () => {
       'N° Facture': inv.invoiceNumber,
       'Date Émission': new Date(inv.createdAt).toLocaleDateString('fr-FR'),
       'Client': inv.customer?.name || 'Client Comptoir',
-      'Statut': statusLabels[inv.status] || inv.status,
+      'Statut': statusLabel(inv.status),
       'Devise': inv.currency,
       'Sous-total HT': inv.subtotal,
       'TVA (16%)': inv.taxAmount,
@@ -198,18 +203,18 @@ export const InvoicesPage: React.FC = () => {
       'Solde Restant': inv.balance,
     }));
     exportToCsv('Factures_OpenPME', rows);
-    success('Export Excel / CSV des factures téléchargé avec succès !');
+    success('Export des factures téléchargé.');
   };
 
   const handleShareWhatsApp = (inv: any) => {
     const phone = inv.customer?.phone ? inv.customer.phone.replace(/[^0-9]/g, '') : '';
     const message = encodeURIComponent(
-      `*${organization?.name || 'OpenPME'} - FACTURE OFFICIELLE*\n` +
+      `*${organization?.name || 'OpenPME'} - FACTURE*\n` +
       `N° Facture : *${inv.invoiceNumber}*\n` +
-      `Client : *${inv.customer?.name || 'Client Comptoir'}*\n` +
+      `Client : *${inv.customer?.name || 'Client comptoir'}*\n` +
       `Date : ${new Date(inv.createdAt).toLocaleDateString('fr-FR')}\n` +
       `Total : *${formatCurrency(Number(inv.total), inv.currency)}*\n` +
-      `Statut : *${statusLabels[inv.status] || inv.status}*\n` +
+      `Statut : *${statusLabel(inv.status)}*\n` +
       `Solde restant : *${formatCurrency(Number(inv.balance), inv.currency)}*\n\n` +
       `_Merci de votre confiance._`
     );
@@ -217,416 +222,336 @@ export const InvoicesPage: React.FC = () => {
     window.open(url, '_blank');
   };
 
-  return (
-    <div>
-      <div className="table-wrapper">
-        <div className="table-toolbar">
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {filterOptions.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`btn btn-sm ${statusFilter === opt.value ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setStatusFilter(opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <div className="table-toolbar-actions">
-            <button type="button" className="btn btn-sm btn-secondary" onClick={handleExportInvoices} title="Exporter les factures vers Excel/CSV">
-              <FileSpreadsheet size={13} /> Exporter Excel
-            </button>
-            <button type="button" className="btn btn-sm btn-secondary" onClick={loadInvoices}>
-              <RefreshCw size={13} /> Actualiser
-            </button>
-          </div>
-        </div>
+  const printThermal = (invoice: any) => {
+    printThermalReceiptWeb({
+      companyName: organization?.name || 'Smart PME Finance',
+      companyAddress: organization?.address,
+      companyPhone: organization?.phone,
+      companyNif: organization?.taxId,
+      receiptNumber: invoice.invoiceNumber,
+      date: new Date(invoice.issueDate || invoice.createdAt).toLocaleString('fr-FR'),
+      customerName: invoice.customer?.name,
+      items: (invoice.items || []).map((i: any) => ({
+        name: i.description || i.product?.name || 'Article',
+        quantity: Number(i.quantity || 1),
+        unitPrice: Number(i.unitPrice || 0),
+        total: Number(i.total || (i.quantity * i.unitPrice) || 0),
+      })),
+      subtotal: Number(invoice.subtotal || invoice.total),
+      taxAmount: Number(invoice.taxAmount || 0),
+      total: Number(invoice.total),
+      currency: invoice.currency || 'CDF',
+      paymentMethod: invoice.status === 'PAID' ? 'RÉGLÉ' : 'EN COURS',
+    }, { width: '80mm' });
+  };
 
-        <div className="table-container">
-          {loading ? (
-            <div className="loading-state">
-              <div className="spinner" />
-              <span>Chargement...</span>
+  const renderTable = () => {
+    if (loading) return <TableSkeleton rows={6} columns={8} />;
+
+    if (loadError && invoices.length === 0) {
+      return <ErrorState title="Impossible de charger les factures" message={loadError} onRetry={loadInvoices} />;
+    }
+
+    if (invoices.length === 0) {
+      return statusFilter ? (
+        <EmptyState
+          icon={ListChecks}
+          title="Aucune facture dans cette catégorie"
+          description={`Aucune facture avec le statut « ${statusLabel(statusFilter)} ».`}
+          action={<Button onClick={() => setStatusFilter('')}>Afficher toutes les factures</Button>}
+        />
+      ) : (
+        <EmptyState
+          icon={Receipt}
+          title="Aucune facture pour le moment"
+          description="Les factures sont générées automatiquement lors des ventes."
+        />
+      );
+    }
+
+    return (
+      <div className="table-container">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>N° de facture</th>
+              <th>Client</th>
+              <th>Émission</th>
+              <th>Échéance</th>
+              <th className="col-amount">Total TTC</th>
+              <th className="col-amount">Réglé</th>
+              <th className="col-amount">Solde dû</th>
+              <th>Statut</th>
+              <th className="col-actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invoices.map((inv: any) => {
+              const balance = Number(inv.balance);
+              const isOverdue = inv.status === 'OVERDUE' || (balance > 0 && new Date(inv.dueDate) < new Date());
+              const status = getStatusMeta(INVOICE_STATUS, inv.status);
+              return (
+                <tr key={inv.id}>
+                  <td className="col-mono">{inv.invoiceNumber}</td>
+                  <td>
+                    <span className="cell-primary">{inv.customer?.name || 'Client comptoir'}</span>
+                    {inv.customer?.phone && <span className="cell-secondary">{inv.customer.phone}</span>}
+                  </td>
+                  <td className="nowrap">{formatDate(inv.issueDate)}</td>
+                  <td className={`nowrap${isOverdue && balance > 0 ? ' text-danger' : ''}`}>{formatDate(inv.dueDate)}</td>
+                  <td className="col-amount">{formatCurrency(Number(inv.total), inv.currency)}</td>
+                  <td className="col-amount text-success">{formatCurrency(Number(inv.paidAmount), inv.currency)}</td>
+                  <td className={`col-amount ${balance > 0 ? 'text-danger' : 'text-success'}`}>
+                    {formatCurrency(balance, inv.currency)}
+                  </td>
+                  <td><StatusBadge tone={status.tone} dot>{status.label}</StatusBadge></td>
+                  <td className="col-actions">
+                    <div className="invoices-actions">
+                      <IconButton icon={<Eye />} size="sm" aria-label={`Voir la facture ${inv.invoiceNumber}`} title="Voir et imprimer" onClick={() => setSelectedInvoice(inv)} />
+                      {balance > 0 && (
+                        <Button size="sm" variant="primary" icon={<CreditCard size={13} />} onClick={() => handleOpenPayment(inv)}>
+                          Régler
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const inv = selectedInvoice;
+  const legalIds = [
+    organization?.taxId ? `NIF : ${organization.taxId}` : null,
+    organization?.rccm ? `RCCM : ${organization.rccm}` : null,
+    organization?.idNat ? `ID NAT : ${organization.idNat}` : null,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <div className="page">
+      <PageToolbar
+        start={(
+          <>
+            <div className="segmented" role="group" aria-label="Filtrer par statut">
+              {FILTER_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`segmented-btn${statusFilter === opt.value ? ' active' : ''}`}
+                  aria-pressed={statusFilter === opt.value}
+                  onClick={() => setStatusFilter(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
-          ) : loadError ? (
-            <div className="table-empty">
-              <div className="table-empty-title" style={{ color: '#DC2626' }}>Erreur de chargement</div>
-              <div className="table-empty-sub">{loadError}</div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={loadInvoices}>
-                <RefreshCw size={12} /> Réessayer
-              </button>
+            {refreshing && <Spinner size="sm" label="Actualisation" />}
+          </>
+        )}
+        end={(
+          <>
+            <Button icon={<FileSpreadsheet size={14} />} onClick={handleExportInvoices}>Exporter vers Excel</Button>
+            <IconButton icon={<RefreshCw />} variant="secondary" aria-label="Actualiser la liste" onClick={loadInvoices} />
+          </>
+        )}
+      />
+
+      <div className="table-wrapper">{renderTable()}</div>
+
+      {/* Aperçu et impression */}
+      <Modal
+        open={Boolean(inv)}
+        onClose={() => setSelectedInvoice(null)}
+        title={inv ? `Facture ${inv.invoiceNumber}` : ''}
+        size="lg"
+        className="invoice-modal"
+        footer={inv ? (
+          <div className="invoice-modal-footer">
+            <Button onClick={() => setSelectedInvoice(null)}>Fermer</Button>
+            <div className="cluster-sm">
+              <Button icon={<Share2 size={14} />} onClick={() => handleShareWhatsApp(inv)} title="Partager le résumé sur WhatsApp">
+                WhatsApp
+              </Button>
+              <Button icon={<Printer size={14} />} onClick={() => printThermal(inv)} title="Imprimer un ticket thermique 80 mm">
+                Ticket 80 mm
+              </Button>
+              <Button variant="primary" icon={<Printer size={14} />} onClick={() => window.print()}>
+                Imprimer (A4)
+              </Button>
             </div>
-          ) : invoices.length === 0 ? (
-            <div className="table-empty">
-              <Receipt className="table-empty-icon" />
-              <div className="table-empty-title">Aucune facture trouvée</div>
-              <div className="table-empty-sub">
-                {statusFilter
-                  ? `Aucune facture avec le statut « ${statusLabels[statusFilter] || statusFilter} ».`
-                  : 'Les factures sont générées automatiquement lors des ventes.'}
+          </div>
+        ) : null}
+      >
+        {inv && (
+          <div className="invoice-document">
+            <header className="invoice-doc-head">
+              <div>
+                <div className="invoice-doc-company">{organization?.name}</div>
+                <div className="invoice-doc-muted">
+                  {organization?.address && <>{organization.address}<br /></>}
+                  {[organization?.city, organization?.country].filter(Boolean).join(', ')}
+                  {organization?.phone && <><br />Tél. : {organization.phone}</>}
+                </div>
               </div>
-            </div>
-          ) : (
-            <table className="data-table">
+              <div className="invoice-doc-meta">
+                <div className="invoice-doc-kind">Facture</div>
+                <div className="invoice-doc-number">N° {inv.invoiceNumber}</div>
+                <div className="invoice-doc-muted">
+                  Émise le {formatDate(inv.issueDate)}<br />
+                  Échéance : {formatDate(inv.dueDate)}
+                </div>
+              </div>
+            </header>
+
+            <section className="invoice-doc-client">
+              <div className="invoice-doc-label">Facturé à</div>
+              <div className="invoice-doc-client-name">{inv.customer?.name || 'Client comptoir'}</div>
+              {inv.customer?.companyName && <div>{inv.customer.companyName}</div>}
+              {inv.customer?.address && <div className="invoice-doc-muted">{inv.customer.address}</div>}
+              {inv.customer?.phone && <div className="invoice-doc-muted">Tél. : {inv.customer.phone}</div>}
+            </section>
+
+            <table className="invoice-doc-lines">
               <thead>
                 <tr>
-                  <th>N° Facture</th>
-                  <th>Client</th>
-                  <th>Émission</th>
-                  <th>Échéance</th>
-                  <th className="col-amount">Total TTC</th>
-                  <th className="col-amount">Réglé</th>
-                  <th className="col-amount">Solde dû</th>
-                  <th>Statut</th>
-                  <th className="col-actions">Actions</th>
+                  <th>Désignation</th>
+                  <th className="text-center">Qté</th>
+                  <th className="text-right">P.U. HT</th>
+                  <th className="text-right">TVA</th>
+                  <th className="text-right">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {invoices.map((inv: any) => {
-                  const balance = Number(inv.balance);
-                  const isOverdue = inv.status === 'OVERDUE' || (balance > 0 && new Date(inv.dueDate) < new Date());
-                  return (
-                    <tr key={inv.id}>
-                      <td className="col-mono">{inv.invoiceNumber}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{inv.customer?.name}</div>
-                        {inv.customer?.phone && (
-                          <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>{inv.customer.phone}</div>
-                        )}
-                      </td>
-                      <td style={{ fontSize: '0.8125rem' }}>{new Date(inv.issueDate).toLocaleDateString('fr-FR')}</td>
-                      <td style={{ fontSize: '0.8125rem', color: isOverdue && balance > 0 ? '#DC2626' : undefined }}>
-                        {new Date(inv.dueDate).toLocaleDateString('fr-FR')}
-                      </td>
-                      <td className="col-amount font-semibold">{formatCurrency(Number(inv.total), inv.currency)}</td>
-                      <td className="col-amount text-success">{formatCurrency(Number(inv.paidAmount), inv.currency)}</td>
-                      <td className="col-amount" style={{ color: balance > 0 ? '#DC2626' : '#16A34A', fontWeight: 700 }}>
-                        {formatCurrency(balance, inv.currency)}
-                      </td>
-                      <td>
-                        <span className={`badge ${statusClass[inv.status] || 'badge-neutral'}`}>
-                          {statusLabels[inv.status] || inv.status}
-                        </span>
-                      </td>
-                      <td className="col-actions">
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedInvoice(inv)}
-                            className="btn btn-sm btn-secondary"
-                            title="Voir et imprimer"
-                          >
-                            <Printer size={13} /> Voir
-                          </button>
-                          {balance > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPayment(inv)}
-                              className="btn btn-sm btn-primary"
-                              title="Enregistrer un règlement"
-                            >
-                              <CreditCard size={13} /> Régler
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {inv.items?.map((item: any, i: number) => (
+                  <tr key={i}>
+                    <td>{item.product?.name || item.description}</td>
+                    <td className="text-center">{item.quantity}</td>
+                    <td className="text-right">{formatCurrency(Number(item.unitPrice), inv.currency)}</td>
+                    <td className="text-right">{item.taxRatePercent} %</td>
+                    <td className="text-right invoice-doc-strong">{formatCurrency(Number(item.total), inv.currency)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          )}
-        </div>
-      </div>
 
-      {/* Modal aperçu / impression facture */}
-      {selectedInvoice && (
-        <div className="modal-overlay">
-          <div className="modal modal-lg" style={{ background: '#fff', color: '#111827' }}>
-            <div className="modal-header" style={{ background: '#fff', borderColor: '#E5E7EB' }}>
-              <span className="modal-title" style={{ color: '#111827' }}>
-                Facture N° {selectedInvoice.invoiceNumber}
-              </span>
-              <button type="button" className="btn-close" onClick={() => setSelectedInvoice(null)} aria-label="Fermer">
-                <X size={18} />
-              </button>
+            <div className="invoice-doc-totals">
+              <div className="invoice-doc-total-row">
+                <span>Sous-total HT</span>
+                <span>{formatCurrency(Number(inv.subtotal), inv.currency)}</span>
+              </div>
+              {Number(inv.taxAmount) > 0 && (
+                <div className="invoice-doc-total-row">
+                  <span>TVA</span>
+                  <span>{formatCurrency(Number(inv.taxAmount), inv.currency)}</span>
+                </div>
+              )}
+              <div className="invoice-doc-total-row is-grand">
+                <span>Total TTC</span>
+                <span>{formatCurrency(Number(inv.total), inv.currency)}</span>
+              </div>
+              <div className="invoice-doc-total-row text-success">
+                <span>Montant réglé</span>
+                <span>{formatCurrency(Number(inv.paidAmount), inv.currency)}</span>
+              </div>
+              <div className={`invoice-doc-total-row ${Number(inv.balance) > 0 ? 'text-danger' : 'text-success'}`}>
+                <span>Solde restant dû</span>
+                <span>{formatCurrency(Number(inv.balance), inv.currency)}</span>
+              </div>
             </div>
-            <div className="modal-body" style={{ background: '#fff' }}>
-              {/* En-tête facture */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #2563EB', paddingBottom: '16px', marginBottom: '20px' }}>
-                <div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1E3A8A', marginBottom: '6px' }}>
-                    {organization?.name}
-                  </div>
-                  <div style={{ fontSize: '0.8125rem', color: '#4B5563', lineHeight: 1.6 }}>
-                    {organization?.address}<br />
-                    {organization?.city}, {organization?.country}<br />
-                    Tél : {organization?.phone}<br />
-                    <strong>NIF :</strong> {organization?.taxId}&ensp;|&ensp;
-                    <strong>RCCM :</strong> {organization?.rccm}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '1.125rem', fontWeight: 800, color: '#2563EB', marginBottom: '4px' }}>
-                    FACTURE COMMERCIALE
-                  </div>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: '1rem' }}>
-                    N° {selectedInvoice.invoiceNumber}
-                  </div>
-                  <div style={{ fontSize: '0.8125rem', color: '#6B7280', marginTop: '4px' }}>
-                    Émission : {new Date(selectedInvoice.issueDate).toLocaleDateString('fr-FR')}<br />
-                    Échéance : {new Date(selectedInvoice.dueDate).toLocaleDateString('fr-FR')}
-                  </div>
-                </div>
+
+            <footer className="invoice-doc-foot">
+              <div className="invoice-doc-legal">
+                {legalIds && <div className="invoice-doc-strong">{legalIds}</div>}
+                {organization?.settings?.invoiceFooterNote && <div>{organization.settings.invoiceFooterNote}</div>}
+                {organization?.settings?.bankDetails && <div>Coordonnées bancaires : {organization.settings.bankDetails}</div>}
               </div>
+              <QRCodeDisplay
+                value={`OPENPME:FAC=${inv.invoiceNumber};NIF=${organization?.taxId || ''};TOTAL=${inv.total}${inv.currency};DATE=${inv.createdAt}`}
+                size={92}
+                label="Contrôle de la facture"
+              />
+            </footer>
+          </div>
+        )}
+      </Modal>
 
-              {/* Client */}
-              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '12px 16px', marginBottom: '20px' }}>
-                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', marginBottom: '4px' }}>Facturé à :</div>
-                <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: '#111827' }}>{selectedInvoice.customer?.name}</div>
-                {selectedInvoice.customer?.companyName && (
-                  <div style={{ fontSize: '0.8125rem', color: '#4B5563' }}>{selectedInvoice.customer.companyName}</div>
-                )}
-                <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>
-                  {selectedInvoice.customer?.address || 'Kinshasa, RDC'}<br />
-                  Tél : {selectedInvoice.customer?.phone || '—'}
-                </div>
-              </div>
+      {/* Règlement */}
+      <Modal
+        open={Boolean(paymentInvoice)}
+        onClose={() => setPaymentInvoice(null)}
+        title="Enregistrer un règlement"
+        icon={CreditCard}
+        busy={submittingPayment}
+        onSubmit={handleRecordPayment}
+        footer={(
+          <>
+            <Button onClick={() => setPaymentInvoice(null)} disabled={submittingPayment}>Annuler</Button>
+            <Button type="submit" variant="primary" icon={<CheckCircle size={14} />} loading={submittingPayment} loadingText="Enregistrement…">
+              Valider le règlement
+            </Button>
+          </>
+        )}
+      >
+        {paymentInvoice && (
+          <>
+            <dl className="invoices-recap">
+              <div><dt>Facture</dt><dd className="font-mono">{paymentInvoice.invoiceNumber}</dd></div>
+              <div><dt>Client</dt><dd>{paymentInvoice.customer?.name || 'Client comptoir'}</dd></div>
+              <div><dt>Solde restant</dt><dd className="text-danger">{formatCurrency(Number(paymentInvoice.balance), paymentInvoice.currency)}</dd></div>
+            </dl>
 
-              {/* Articles */}
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px', fontSize: '0.8125rem' }}>
-                <thead>
-                  <tr style={{ background: '#1E3A8A', color: '#fff' }}>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600 }}>Désignation</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600 }}>Qté</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>P.U. HT</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>TVA</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedInvoice.items?.map((item: any, i: number) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #E5E7EB' }}>
-                      <td style={{ padding: '7px 12px' }}>{item.product?.name || item.description}</td>
-                      <td style={{ padding: '7px 12px', textAlign: 'center' }}>{item.quantity}</td>
-                      <td style={{ padding: '7px 12px', textAlign: 'right' }}>{formatCurrency(Number(item.unitPrice), selectedInvoice.currency)}</td>
-                      <td style={{ padding: '7px 12px', textAlign: 'right' }}>{item.taxRatePercent}%</td>
-                      <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 700 }}>{formatCurrency(Number(item.total), selectedInvoice.currency)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            {paymentError && <Alert tone="danger">{paymentError}</Alert>}
 
-              {/* Totaux */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-                <div style={{ width: '280px', fontSize: '0.8125rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#6B7280' }}>
-                    <span>Sous-total HT</span>
-                    <span>{formatCurrency(Number(selectedInvoice.subtotal), selectedInvoice.currency)}</span>
-                  </div>
-                  {Number(selectedInvoice.taxAmount) > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#6B7280' }}>
-                      <span>TVA</span>
-                      <span>{formatCurrency(Number(selectedInvoice.taxAmount), selectedInvoice.currency)}</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontWeight: 800, fontSize: '1rem', borderTop: '2px solid #1E3A8A', color: '#1E3A8A', marginTop: '4px' }}>
-                    <span>Total TTC</span>
-                    <span>{formatCurrency(Number(selectedInvoice.total), selectedInvoice.currency)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#16A34A', fontWeight: 600 }}>
-                    <span>Montant réglé</span>
-                    <span>{formatCurrency(Number(selectedInvoice.paidAmount), selectedInvoice.currency)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#DC2626', fontWeight: 700 }}>
-                    <span>Solde restant dû</span>
-                    <span>{formatCurrency(Number(selectedInvoice.balance), selectedInvoice.currency)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Pied légal & QR Code Fiscal */}
-              <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
-                <div style={{ fontSize: '0.75rem', color: '#6B7280', lineHeight: 1.5, textAlign: 'left', flex: 1 }}>
-                  <div style={{ fontWeight: 700, color: '#1E293B', marginBottom: '2px' }}>Mentions Fiscales & Légales (RDC) :</div>
-                  NIF : <strong>{organization?.taxId || 'A1209384E'}</strong> · RCCM : <strong>{organization?.rccm || 'CD/KIN/RCCM/20-B-1092'}</strong><br />
-                  {organization?.settings?.invoiceFooterNote || 'Facture certifiée conforme aux exigences fiscales — République Démocratique du Congo'}<br />
-                  {organization?.settings?.bankDetails && `Coordonnées : ${organization.settings.bankDetails}`}
-                </div>
-                <QRCodeDisplay
-                  value={`OPENPME:FAC=${selectedInvoice.invoiceNumber};NIF=${organization?.taxId || 'A1209384E'};TOTAL=${selectedInvoice.total}${selectedInvoice.currency};DATE=${selectedInvoice.createdAt}`}
-                  size={95}
-                  label="Scan Fiscalité DGI"
+            <Field label="Montant du règlement" required htmlFor="pay-amount">
+              <div className="input-addon">
+                <input
+                  id="pay-amount"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max={Number(paymentInvoice.balance)}
+                  required
+                  className="input-field"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
                 />
+                <span className="input-addon-text">{paymentInvoice.currency}</span>
               </div>
-            </div>
-            <div className="modal-footer" style={{ background: '#F8FAFC', borderColor: '#E2E8F0', display: 'flex', justifyContent: 'space-between' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setSelectedInvoice(null)}>
-                Fermer
-              </button>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ background: '#25D366', color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  onClick={() => handleShareWhatsApp(selectedInvoice)}
-                  title="Partager la facture sur WhatsApp"
-                >
-                  <Share2 size={14} /> WhatsApp
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                  onClick={() => {
-                    if (!selectedInvoice) return;
-                    printThermalReceiptWeb({
-                      companyName: organization?.name || 'Smart PME Finance',
-                      companyAddress: organization?.address,
-                      companyPhone: organization?.phone,
-                      companyNif: organization?.taxId,
-                      receiptNumber: selectedInvoice.invoiceNumber,
-                      date: new Date(selectedInvoice.issueDate || selectedInvoice.createdAt).toLocaleString('fr-FR'),
-                      customerName: selectedInvoice.customer?.name,
-                      items: (selectedInvoice.items || []).map((i: any) => ({
-                        name: i.description || i.product?.name || 'Article',
-                        quantity: Number(i.quantity || 1),
-                        unitPrice: Number(i.unitPrice || 0),
-                        total: Number(i.total || (i.quantity * i.unitPrice) || 0),
-                      })),
-                      subtotal: Number(selectedInvoice.subtotal || selectedInvoice.total),
-                      taxAmount: Number(selectedInvoice.taxAmount || 0),
-                      total: Number(selectedInvoice.total),
-                      currency: selectedInvoice.currency || 'CDF',
-                      paymentMethod: selectedInvoice.status === 'PAID' ? 'RÉGLÉ' : 'EN COURS',
-                    }, { width: '80mm' });
-                  }}
-                  title="Imprimer un ticket thermique ESC/POS 80mm"
-                >
-                  <Printer size={14} /> Ticket 80mm
-                </button>
-                <button type="button" className="btn btn-primary" onClick={() => window.print()}>
-                  <Printer size={14} /> Imprimer A4
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+            </Field>
 
-      {/* Modal règlement */}
-      {paymentInvoice && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <span className="modal-title">Enregistrer un règlement</span>
-              <button type="button" className="btn-close" onClick={() => setPaymentInvoice(null)} aria-label="Fermer">
-                <X size={18} />
-              </button>
-            </div>
+            <Field label="Mode de paiement" required htmlFor="pay-method">
+              <select
+                id="pay-method"
+                className="select-field"
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              >
+                <option value="CASH">Espèces</option>
+                <option value="BANK_TRANSFER">Virement bancaire</option>
+                <option value="MOBILE_MONEY_MPESA">Vodacom M-Pesa</option>
+                <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
+                <option value="MOBILE_MONEY_ORANGE">Orange Money</option>
+                <option value="CHECK">Chèque</option>
+              </select>
+            </Field>
 
-            <form onSubmit={handleRecordPayment}>
-              <div className="modal-body">
-                <div style={{
-                  background: '#F8FAFC',
-                  border: '1px solid #E2E8F0',
-                  borderRadius: '6px',
-                  padding: '12px 14px',
-                  marginBottom: '16px',
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '0.8125rem', color: '#6B7280' }}>Facture N°</span>
-                    <span className="col-mono" style={{ fontSize: '0.8125rem' }}>{paymentInvoice.invoiceNumber}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '0.8125rem', color: '#6B7280' }}>Client</span>
-                    <span style={{ fontWeight: 600, fontSize: '0.8125rem' }}>{paymentInvoice.customer?.name}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '0.8125rem', color: '#6B7280' }}>Solde restant</span>
-                    <span style={{ fontWeight: 700, color: '#DC2626', fontSize: '0.9rem' }}>
-                      {formatCurrency(Number(paymentInvoice.balance), paymentInvoice.currency)}
-                    </span>
-                  </div>
-                </div>
-
-                {paymentError && (
-                  <div className="alert alert-danger" style={{ marginBottom: '14px' }}>
-                    <AlertTriangle size={14} className="alert-icon" />
-                    <span>{paymentError}</span>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="pay-amount">
-                    Montant du règlement ({paymentInvoice.currency}) <span className="required">*</span>
-                  </label>
-                  <input
-                    id="pay-amount"
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    max={Number(paymentInvoice.balance)}
-                    required
-                    className="input-field"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="pay-method">Mode de paiement <span className="required">*</span></label>
-                  <select
-                    id="pay-method"
-                    className="input-field"
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                  >
-                    <option value="CASH">Espèces</option>
-                    <option value="BANK_TRANSFER">Virement bancaire</option>
-                    <option value="MOBILE_MONEY_MPESA">Vodacom M-Pesa</option>
-                    <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
-                    <option value="MOBILE_MONEY_ORANGE">Orange Money</option>
-                    <option value="CHECK">Chèque</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="pay-ref">Référence / N° bordereau</label>
-                  <input
-                    id="pay-ref"
-                    type="text"
-                    className="input-field"
-                    placeholder="ex : VIR-RAWBANK-12093"
-                    value={paymentRef}
-                    onChange={(e) => setPaymentRef(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setPaymentInvoice(null)}>
-                  Annuler
-                </button>
-                <button type="submit" disabled={submittingPayment} className="btn btn-primary">
-                  {submittingPayment ? (
-                    <>
-                      <span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
-                      Enregistrement...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle size={14} />
-                      Valider le règlement
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <Field label="Référence ou n° de bordereau" htmlFor="pay-ref" hint="Facultatif pour les espèces." className="mb-0">
+              <input
+                id="pay-ref"
+                type="text"
+                className="input-field"
+                placeholder="Ex. VIR-RAWBANK-12093"
+                value={paymentRef}
+                onChange={(e) => setPaymentRef(e.target.value)}
+              />
+            </Field>
+          </>
+        )}
+      </Modal>
     </div>
   );
 };

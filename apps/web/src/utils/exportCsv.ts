@@ -1,3 +1,4 @@
+import { notify } from '../lib/notify';
 /**
  * Utilitaire d'exportation de données au format CSV / Excel
  * Compatible avec Microsoft Excel, LibreOffice et Google Sheets
@@ -5,7 +6,7 @@
 
 export function exportToCsv(filename: string, rows: Record<string, any>[]) {
   if (!rows || !rows.length) {
-    alert('Aucune donnée à exporter.');
+    notify.info('Aucune donnée à exporter pour le moment.');
     return;
   }
 

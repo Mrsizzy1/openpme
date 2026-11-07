@@ -1,0 +1,343 @@
+/* Caisse & ventes */
+.sales-topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.sales-topbar .tabs {
+  border-bottom: none;
+}
+
+.sales-topbar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-bottom: 8px;
+}
+
+.sales-shortcuts {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.sales-shortcuts kbd + kbd,
+.sales-shortcuts kbd {
+  margin-left: 4px;
+}
+
+@media (max-width: 1279px) {
+  .sales-shortcuts {
+    display: none;
+  }
+}
+
+.sales-pos {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(340px, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 1099px) {
+  .sales-pos {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sales-cart {
+  position: sticky;
+  top: 0;
+}
+
+/* Cartes produit (boutons) */
+.sales-page .product-grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  max-height: calc(100vh - 290px);
+  min-height: 160px;
+  padding: 2px;
+}
+
+.sales-page .product-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.sales-page .product-card:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
+}
+
+.sales-page .product-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.product-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.sales-page .product-card-name {
+  flex: 1;
+}
+
+.product-card-add {
+  color: var(--primary);
+}
+
+/* Panier */
+.sales-error {
+  margin-bottom: var(--space-3);
+}
+
+.sales-lines {
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: -8px 0 var(--space-3);
+}
+
+.sales-line {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sales-line-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sales-line-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sales-line-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: 6px;
+}
+
+.sales-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sales-qty-value {
+  min-width: 26px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sales-discount {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.sales-discount .input-field {
+  width: 58px;
+  text-align: center;
+}
+
+.sales-line-total {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sales-form {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.sales-check {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.sales-totals {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--space-4);
+  padding: 12px 14px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+
+.sales-totals > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: 0.8125rem;
+}
+
+.sales-totals dt {
+  color: var(--text-secondary);
+}
+
+.sales-totals dd {
+  font-weight: 600;
+  text-align: right;
+}
+
+.sales-totals .is-total {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.sales-totals .is-total dt {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.sales-totals .is-total dd {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.sales-equivalent {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.sales-cash {
+  margin-bottom: var(--space-4);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.sales-cash-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.sales-cash-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sales-cash-title svg {
+  color: var(--success);
+}
+
+.sales-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.sales-change {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: var(--space-3);
+  padding: 10px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.sales-change.is-ok      { background: var(--success-bg); border-color: var(--success-border); color: #15803D; }
+.sales-change.is-missing { background: var(--danger-bg);  border-color: var(--danger-border);  color: #B91C1C; }
+
+.sales-change-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sales-change-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.sales-change-sub {
+  font-size: 0.75rem;
+}
+
+.sales-checkout {
+  font-weight: 600;
+}
+
+.sales-checkout-kbd {
+  margin-left: 6px;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: inherit;
+}
+
+/* Vente enregistrée */
+.sales-success-text {
+  margin-bottom: var(--space-3);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.sales-totals-boxed {
+  margin-bottom: var(--space-4);
+}
+
+.sales-success-qr {
+  display: flex;
+  justify-content: center;
+}
+
+.sales-success-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  width: 100%;
+}

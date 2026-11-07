@@ -5,12 +5,32 @@ import {
   Unlock,
   RefreshCw,
   AlertTriangle,
-  Shield,
   Laptop,
-  Radio,
+  Pause,
+  Play,
+  Wifi,
+  WifiOff,
+  Ban,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react';
 import { ApiClient } from '../api/client';
 import { useToast } from '../context/ToastContext';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  Field,
+  IconButton,
+  KpiCard,
+  Modal,
+  PageToolbar,
+  StatusBadge,
+  TableSkeleton,
+} from '../components/ui';
+import { formatNumber, formatRelativeTime } from '../lib/format';
+import { getRoleLabel } from '../lib/status';
+import './TerminalsPage.css';
 
 interface Terminal {
   id: string;
@@ -30,12 +50,44 @@ interface Terminal {
   cashSessionId?: string;
 }
 
+type TerminalAction = 'LOCK' | 'UNLOCK' | 'REVOKE';
+
+const ACTION_COPY: Record<TerminalAction, {
+  title: string;
+  description: string;
+  confirm: string;
+  tone: 'warning' | 'success' | 'danger';
+  icon: typeof Lock;
+}> = {
+  LOCK: {
+    title: 'Verrouiller le poste',
+    description: 'Un écran de verrouillage s’affichera sur le poste. L’application reste active pour permettre le déverrouillage à distance.',
+    confirm: 'Confirmer le verrouillage',
+    tone: 'warning',
+    icon: Lock,
+  },
+  UNLOCK: {
+    title: 'Déverrouiller le poste',
+    description: 'Le poste retrouvera son accès dès qu’il recevra cette commande. Une reconnexion de l’utilisateur pourra être demandée.',
+    confirm: 'Confirmer le déverrouillage',
+    tone: 'success',
+    icon: Unlock,
+  },
+  REVOKE: {
+    title: 'Révoquer le poste',
+    description: 'Le jeton de sécurité sera invalidé immédiatement. Le poste restera bloqué et devra être réenrôlé localement par un administrateur autorisé.',
+    confirm: 'Confirmer la révocation',
+    tone: 'danger',
+    icon: AlertTriangle,
+  },
+};
+
 export const TerminalsPage: React.FC = () => {
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedTerminal, setSelectedTerminal] = useState<Terminal | null>(null);
-  const [actionType, setActionType] = useState<'LOCK' | 'UNLOCK' | 'REVOKE' | null>(null);
+  const [actionType, setActionType] = useState<TerminalAction | null>(null);
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -60,15 +112,21 @@ export const TerminalsPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
-  const handleOpenActionModal = (term: Terminal, type: 'LOCK' | 'REVOKE' = 'LOCK') => {
+  const handleOpenActionModal = (term: Terminal, type: TerminalAction = 'LOCK') => {
     setSelectedTerminal(term);
     setActionType(type);
     setReason(type === 'LOCK'
       ? 'Poste temporairement verrouillé pour vérification.'
-      : 'Révocation administrative du poste.');
+      : type === 'REVOKE' ? 'Révocation administrative du poste.' : '');
   };
 
-  const handleConfirmAction = async () => {
+  const closeActionModal = () => {
+    setSelectedTerminal(null);
+    setActionType(null);
+  };
+
+  const handleConfirmAction = async (event?: React.FormEvent) => {
+    event?.preventDefault();
     if (!actionType || !selectedTerminal || !reason.trim()) return;
     setSubmitting(true);
     try {
@@ -82,12 +140,11 @@ export const TerminalsPage: React.FC = () => {
         : actionType === 'UNLOCK' ? 'Déverrouillage' : 'Révocation';
       if (result.acknowledged) success(`${actionLabel} appliqué sur ${selectedTerminal.id}.`);
       else if (actionType === 'REVOKE') {
-        warning(`Jeton de ${selectedTerminal.id} révoqué; le poste doit être réenrôlé pour se reconnecter.`);
+        warning(`Jeton de ${selectedTerminal.id} révoqué ; le poste doit être réenrôlé pour se reconnecter.`);
       } else {
-        warning(`${actionLabel} envoyé; application en attente de confirmation du poste.`);
+        warning(`${actionLabel} envoyé ; application en attente de confirmation du poste.`);
       }
-      setSelectedTerminal(null);
-      setActionType(null);
+      closeActionModal();
       await fetchTerminals();
     } catch (err: any) {
       error(err.message || "Erreur lors de l'exécution de la commande à distance.");
@@ -98,455 +155,222 @@ export const TerminalsPage: React.FC = () => {
 
   const formatLastPing = (dateStr?: string | null) => {
     if (!dateStr) return 'Aucun signal reçu';
-    try {
-      const ping = new Date(dateStr).getTime();
-      const diffSec = Math.floor((Date.now() - ping) / 1000);
-      if (diffSec < 3) return 'En direct (<3s)';
-      if (diffSec < 60) return `Il y a ${diffSec}s`;
-      return `Il y a ${Math.floor(diffSec / 60)} min`;
-    } catch {
-      return dateStr;
-    }
+    const ping = new Date(dateStr).getTime();
+    if (Number.isNaN(ping)) return dateStr;
+    const diffSec = Math.floor((Date.now() - ping) / 1000);
+    if (diffSec < 3) return 'En direct';
+    if (diffSec < 60) return `il y a ${diffSec} s`;
+    return formatRelativeTime(dateStr);
   };
 
   const onlineTerminals = terminals.filter((t) => t.status === 'ONLINE');
   const lockedTerminals = terminals.filter((t) => t.status === 'LOCKED');
+  const offlineTerminals = terminals.filter((t) => t.status !== 'ONLINE' && t.status !== 'LOCKED');
+
+  const renderStatus = (term: Terminal) => {
+    if (term.status === 'ONLINE') return <StatusBadge tone="success" dot>En ligne</StatusBadge>;
+    if (term.status === 'LOCKED') return <StatusBadge tone="warning" icon={Lock}>Verrouillé</StatusBadge>;
+    return <StatusBadge tone="neutral" dot>Hors ligne</StatusBadge>;
+  };
+
+  const actionCopy = actionType ? ACTION_COPY[actionType] : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* Barre de contrôle supérieure */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '12px',
-        background: 'white',
-        padding: '16px 20px',
-        borderRadius: '12px',
-        border: '1px solid #E2E8F0',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-      }}>
-        <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Postes Actifs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: 12,
-              height: 12,
-              borderRadius: '50%',
-              background: onlineTerminals.length > 0 ? '#10B981' : '#94A3B8',
-              boxShadow: onlineTerminals.length > 0 ? '0 0 10px #10B981' : 'none'
-            }} />
-            <div>
-              <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
-                Caisses En Ligne
-              </div>
-              <div style={{ fontSize: '20px', fontWeight: 800, color: '#0F172A' }}>
-                {onlineTerminals.length}
-              </div>
-            </div>
-          </div>
+    <div className="page terminals-page">
+      <PageToolbar
+        start={(
+          <span className={`terminals-live${autoRefresh ? ' is-live' : ''}`} role="status">
+            <span className="terminals-live-dot" aria-hidden="true" />
+            {autoRefresh ? 'Supervision en direct · actualisation toutes les 3 s' : 'Supervision en pause'}
+          </span>
+        )}
+        end={(
+          <>
+            <Button
+              icon={autoRefresh ? <Pause size={15} /> : <Play size={15} />}
+              onClick={() => setAutoRefresh(!autoRefresh)}
+            >
+              {autoRefresh ? 'Mettre en pause' : 'Reprendre le direct'}
+            </Button>
+            <IconButton icon={<RefreshCw />} variant="secondary" aria-label="Actualiser maintenant" onClick={fetchTerminals} />
+          </>
+        )}
+      />
 
-          <div style={{ width: 1, height: 32, background: '#E2E8F0' }} />
-
-          {/* Postes Verrouillés */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: 12,
-              height: 12,
-              borderRadius: '50%',
-              background: lockedTerminals.length > 0 ? '#F59E0B' : '#CBD5E1',
-            }} />
-            <div>
-              <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
-                Verrouillés
-              </div>
-              <div style={{ fontSize: '20px', fontWeight: 800, color: '#0F172A' }}>
-                {lockedTerminals.length}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ width: 1, height: 32, background: '#E2E8F0' }} />
-
-          {/* Synchronisation en temps réel */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Radio size={16} color="#0284C7" className={autoRefresh ? 'spin' : ''} />
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#0369A1' }}>
-              Supervision Directe (3s)
-            </span>
-          </div>
-        </div>
-
-        {/* Boutons d'actions */}
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <button
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            className="btn btn-secondary"
-            style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <RefreshCw size={14} className={autoRefresh ? 'spin' : ''} />
-            {autoRefresh ? 'Pause' : 'Activer Direct'}
-          </button>
-
-          <button
-            onClick={fetchTerminals}
-            className="btn btn-secondary"
-            style={{ fontSize: '13px' }}
-          >
-            Actualiser
-          </button>
-        </div>
+      <div className="kpi-grid">
+        <KpiCard
+          label="Postes en ligne"
+          value={formatNumber(onlineTerminals.length)}
+          icon={Wifi}
+          tone="success"
+          hint={`sur ${formatNumber(terminals.length)} poste(s) enregistré(s)`}
+          loading={loading}
+        />
+        <KpiCard
+          label="Postes verrouillés"
+          value={formatNumber(lockedTerminals.length)}
+          icon={Lock}
+          tone="warning"
+          valueTone={lockedTerminals.length > 0 ? 'warning' : undefined}
+          hint="Verrouillage à distance actif"
+          loading={loading}
+        />
+        <KpiCard
+          label="Postes hors ligne"
+          value={formatNumber(offlineTerminals.length)}
+          icon={WifiOff}
+          tone="neutral"
+          hint="Aucun signal récent"
+          loading={loading}
+        />
       </div>
 
-      {/* Guide clair */}
-      <div style={{
-        background: '#F0F9FF',
-        border: '1px solid #BAE6FD',
-        borderRadius: '10px',
-        padding: '12px 18px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        color: '#0369A1',
-        fontSize: '13px',
-      }}>
-        <Shield size={20} color="#0284C7" style={{ flexShrink: 0 }} />
-        <div>
-          <b>Supervision & Contrôle à Distance :</b> Cet écran vous permet de surveiller en direct l'état des postes caisse Windows connectés.
-          Vous pouvez verrouiller ou déverrouiller un poste sans arrêter l'application. Les commandes en attente affichent leur état d'acquittement.
-        </div>
-      </div>
+      <Alert tone="info" title="Contrôle à distance">
+        Surveillez en direct les postes de caisse Windows connectés. Vous pouvez verrouiller ou déverrouiller un poste sans arrêter l’application ; chaque commande affiche son état d’acquittement.
+      </Alert>
 
-      {/* Liste des postes de caisse */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid #E2E8F0', borderRadius: '12px' }}>
-        <table className="table" style={{ margin: 0 }}>
-          <thead style={{ background: '#F8FAFC' }}>
-            <tr>
-              <th style={{ padding: '14px 18px' }}>Poste de Travail</th>
-              <th>Type de Client</th>
-              <th>Utilisateur & Rôle</th>
-              <th>Adresse IP</th>
-              <th>Dernier Signal</th>
-              <th>État</th>
-              <th style={{ textAlign: 'right', paddingRight: '18px' }}>Actions de Contrôle</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>
-                  Recherche des postes connectés...
-                </td>
-              </tr>
-            ) : terminals.length === 0 ? (
-              <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '48px 20px', color: '#64748B' }}>
-                  <Monitor size={42} color="#94A3B8" style={{ margin: '0 auto 12px', display: 'block' }} />
-                  <div style={{ fontSize: '15px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
-                    Aucune caisse connectée actuellement
-                  </div>
-                  <p style={{ fontSize: '13px', color: '#64748B', maxWidth: '500px', margin: '0 auto' }}>
-                    Pour connecter un poste caisse, lancez le fichier <b>LANCER_DESKTOP.bat</b> sur la machine Windows.
-                    Le poste s'affichera ici en direct avec son identifiant matériel.
-                  </p>
-                </td>
-              </tr>
-            ) : (
-              terminals.map((term) => {
-                const isOnline = term.status === 'ONLINE';
-                const isLocked = term.status === 'LOCKED';
-
-                return (
-                  <tr
-                    key={term.id}
-                    style={{
-                      background: isLocked ? '#FFFBEB' : undefined,
-                      borderBottom: '1px solid #F1F5F9'
-                    }}
-                  >
-                    <td style={{ padding: '14px 18px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{
-                          background: isOnline ? '#DCFCE7' : isLocked ? '#FEF3C7' : '#F1F5F9',
-                          padding: '8px',
-                          borderRadius: '8px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}>
-                          <Laptop size={18} color={isOnline ? '#16A34A' : isLocked ? '#D97706' : '#64748B'} />
-                        </div>
-                        <div>
-                          <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '14px' }}>
-                            {term.id}
-                          </div>
-                          {term.cashSessionId ? (
-                            <span style={{ fontSize: '11px', color: '#059669', fontWeight: 600 }}>
-                              Caisse ouverte (#{term.cashSessionId.slice(0, 8)})
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: '11px', color: '#64748B' }}>
-                              Prêt pour vente
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-
-                    <td>
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: '#EEF2FF',
-                        color: '#4338CA',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        padding: '4px 10px',
-                        borderRadius: '12px'
-                      }}>
-                        {term.clientType === 'DESKTOP_PYQT' ? 'Windows Natif (PyQt6)' : 'Navigateur Web'}
-                      </span>
-                    </td>
-
-                    <td>
-                      <div style={{ fontWeight: 600, color: '#1E293B', fontSize: '13px' }}>
-                        {term.userName || 'Non assigné'}
-                      </div>
-                      <div style={{ fontSize: '11px', color: '#64748B' }}>
-                        {term.userRole}
-                      </div>
-                    </td>
-
-                    <td style={{ fontSize: '12px', fontFamily: 'monospace', color: '#475569' }}>
-                      {term.ipAddress}
-                    </td>
-
-                    <td style={{ fontSize: '12px', color: '#475569' }}>
-                      {formatLastPing(term.lastPing)}
-                    </td>
-
-                    <td>
-                      {isOnline && (
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          color: '#166534',
-                          background: '#DCFCE7',
-                          padding: '4px 10px',
-                          borderRadius: '16px',
-                          fontSize: '12px',
-                          fontWeight: 700,
-                        }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16A34A' }} />
-                          En Ligne
-                        </span>
-                      )}
-                      {isLocked && (
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          color: '#92400E',
-                          background: '#FEF3C7',
-                          padding: '4px 10px',
-                          borderRadius: '16px',
-                          fontSize: '12px',
-                          fontWeight: 700,
-                        }}>
-                          <Lock size={12} />
-                          Verrouillé
-                        </span>
-                      )}
-                      {!isOnline && !isLocked && (
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          color: '#475569',
-                          background: '#F1F5F9',
-                          padding: '4px 10px',
-                          borderRadius: '16px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                        }}>
-                          Déconnecté
-                        </span>
-                      )}
-                    </td>
-
-                    <td style={{ textAlign: 'right', paddingRight: '18px' }}>
-                      <div style={{ display: 'inline-flex', gap: '8px' }}>
-                        {term.tokenRevoked ? (
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#B91C1C' }}>
-                            Jeton révoqué · réenrôlement requis
-                          </span>
-                        ) : isLocked ? (
-                          <button
-                            onClick={() => {
-                              setSelectedTerminal(term);
-                              setActionType('UNLOCK');
-                              setReason('');
-                            }}
-                            className="btn btn-secondary"
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '12px',
-                              fontWeight: 600,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              color: '#059669',
-                              borderColor: '#A7F3D0',
-                              background: '#ECFDF5'
-                            }}
-                          >
-                            <Unlock size={14} /> Déverrouiller
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleOpenActionModal(term)}
-                            className="btn btn-secondary"
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '12px',
-                              fontWeight: 600,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              color: '#D97706',
-                              borderColor: '#FDE68A',
-                              background: '#FFFBEB'
-                            }}
-                          >
-                            <Lock size={14} /> Verrouiller
-                          </button>
-                        )}
-                        {!term.tokenRevoked && (
-                          <>
-                            <button
-                              onClick={() => handleOpenActionModal(term, 'REVOKE')}
-                              className="btn btn-secondary"
-                              style={{
-                                padding: '6px 10px',
-                                fontSize: '11px',
-                                color: '#B91C1C',
-                                borderColor: '#FECACA',
-                              }}
-                            >
-                              Révoquer
-                            </button>
-                            <div style={{ fontSize: '11px', color: term.commandAcknowledged ? '#15803D' : '#B45309' }}>
-                              {term.commandAcknowledged ? 'État appliqué' : 'En attente du poste'}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
+      <div className="table-wrapper">
+        {loading ? (
+          <TableSkeleton rows={3} columns={7} />
+        ) : terminals.length === 0 ? (
+          <EmptyState
+            icon={Monitor}
+            title="Aucun poste connecté pour le moment"
+            description={(
+              <>Pour connecter un poste de caisse, lancez <strong>LANCER_DESKTOP.bat</strong> sur la machine Windows. Le poste apparaîtra ici avec son identifiant matériel.</>
             )}
-          </tbody>
-        </table>
+          />
+        ) : (
+          <div className="table-container">
+            <table className="data-table terminals-table">
+              <thead>
+                <tr>
+                  <th>Poste</th>
+                  <th>Client</th>
+                  <th>Utilisateur</th>
+                  <th>Adresse IP</th>
+                  <th>Dernier signal</th>
+                  <th>État</th>
+                  <th className="col-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {terminals.map((term) => {
+                  const isOnline = term.status === 'ONLINE';
+                  const isLocked = term.status === 'LOCKED';
+
+                  return (
+                    <tr key={term.id} className={isLocked ? 'is-locked' : undefined}>
+                      <td>
+                        <div className="terminals-identity">
+                          <span
+                            className={`icon-tile icon-tile-sm icon-tile-${isOnline ? 'success' : isLocked ? 'warning' : 'neutral'}`}
+                            aria-hidden="true"
+                          >
+                            <Laptop size={15} />
+                          </span>
+                          <div>
+                            <span className="cell-primary">{term.id}</span>
+                            <span className={`cell-secondary${term.cashSessionId ? ' text-success' : ''}`}>
+                              {term.cashSessionId ? `Caisse ouverte · n° ${term.cashSessionId.slice(0, 8)}` : 'Prêt pour la vente'}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <StatusBadge tone="neutral">
+                          {term.clientType === 'DESKTOP_PYQT' ? 'Application Windows' : 'Navigateur web'}
+                        </StatusBadge>
+                      </td>
+                      <td>
+                        <span className="cell-primary">{term.userName || 'Non assigné'}</span>
+                        <span className="cell-secondary">{term.userRole ? getRoleLabel(term.userRole) : '—'}</span>
+                      </td>
+                      <td className="col-mono">{term.ipAddress || '—'}</td>
+                      <td className="nowrap" title={term.lastPing ? new Date(term.lastPing).toLocaleString('fr-FR') : undefined}>
+                        {formatLastPing(term.lastPing)}
+                      </td>
+                      <td>
+                        {renderStatus(term)}
+                        {!term.tokenRevoked && (
+                          <span className={`terminals-ack${term.commandAcknowledged ? ' is-applied' : ''}`}>
+                            {term.commandAcknowledged
+                              ? <><CheckCircle2 size={12} aria-hidden="true" /> État appliqué</>
+                              : <><Clock size={12} aria-hidden="true" /> En attente du poste</>}
+                          </span>
+                        )}
+                      </td>
+                      <td className="col-actions">
+                        {term.tokenRevoked ? (
+                          <StatusBadge tone="danger" icon={Ban} title="Le poste doit être réenrôlé pour se reconnecter">
+                            Jeton révoqué
+                          </StatusBadge>
+                        ) : (
+                          <div className="terminals-actions">
+                            {isLocked ? (
+                              <Button size="sm" icon={<Unlock size={14} />} onClick={() => handleOpenActionModal(term, 'UNLOCK')}>
+                                Déverrouiller
+                              </Button>
+                            ) : (
+                              <Button size="sm" icon={<Lock size={14} />} onClick={() => handleOpenActionModal(term)}>
+                                Verrouiller
+                              </Button>
+                            )}
+                            <Button size="sm" variant="danger-outline" onClick={() => handleOpenActionModal(term, 'REVOKE')}>
+                              Révoquer
+                            </Button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Confirmation de changement d'état */}
-      {actionType && (
-        <div className="modal-backdrop">
-          <div className="modal" style={{ maxWidth: '480px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
-              <div style={{
-                background: actionType === 'LOCK' ? '#FEF3C7' : actionType === 'UNLOCK' ? '#DCFCE7' : '#FEE2E2',
-                padding: '10px',
-                borderRadius: '50%',
-                color: actionType === 'LOCK' ? '#D97706' : actionType === 'UNLOCK' ? '#15803D' : '#B91C1C',
-              }}>
-                {actionType === 'LOCK' ? <Lock size={24} /> : actionType === 'UNLOCK' ? <Unlock size={24} /> : <AlertTriangle size={24} />}
-              </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>
-                  {actionType === 'LOCK'
-                    ? 'Verrouiller le poste'
-                    : actionType === 'UNLOCK' ? 'Déverrouiller le poste' : 'Révoquer le poste'}
-                </h3>
-                <span style={{ fontSize: '12px', color: '#64748B' }}>
-                  Poste cible : {selectedTerminal?.id}
-                </span>
-              </div>
-            </div>
-
-            <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.5 }}>
-              {actionType === 'LOCK'
-                ? "Un écran de verrouillage s'affichera sur le poste. L'application restera active pour permettre le déverrouillage à distance."
-                : actionType === 'UNLOCK'
-                  ? "Le poste retrouvera son accès dès qu'il recevra cette commande. Une reconnexion utilisateur pourra être demandée."
-                  : "Le jeton de sécurité sera invalidé immédiatement. Le poste restera bloqué et devra être réenrôlé localement par un administrateur autorisé."}
-            </p>
-
-            <div style={{ marginTop: '14px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#334155' }}>
-                Motif administratif :
-              </label>
-              <textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={2}
-                className="input"
-                style={{ width: '100%', resize: 'none', fontSize: '13px' }}
-                placeholder="Motif administratif..."
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedTerminal(null);
-                  setActionType(null);
-                }}
-                className="btn btn-secondary"
-                disabled={submitting}
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmAction}
-                disabled={submitting || !reason.trim()}
-                className="btn"
-                style={{
-                  background: actionType === 'LOCK' ? '#D97706' : actionType === 'UNLOCK' ? '#15803D' : '#B91C1C',
-                  color: 'white',
-                  border: 'none',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                {submitting ? (
-                  'Exécution...'
-                ) : actionType === 'LOCK' ? (
-                  <>
-                    <Lock size={15} /> Confirmer le verrouillage
-                  </>
-                ) : actionType === 'UNLOCK' ? (
-                  <>
-                    <Unlock size={15} /> Confirmer le déverrouillage
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle size={15} /> Confirmer la révocation
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={Boolean(actionType && actionCopy)}
+        onClose={closeActionModal}
+        title={actionCopy?.title ?? ''}
+        description={actionCopy?.description}
+        icon={actionCopy?.icon}
+        tone={actionCopy?.tone}
+        size="sm"
+        busy={submitting}
+        onSubmit={handleConfirmAction}
+        footer={(
+          <>
+            <Button onClick={closeActionModal} disabled={submitting}>Annuler</Button>
+            <Button
+              type="submit"
+              variant={actionCopy?.tone ?? 'primary'}
+              loading={submitting}
+              loadingText="Exécution…"
+              disabled={!reason.trim()}
+            >
+              {actionCopy?.confirm}
+            </Button>
+          </>
+        )}
+      >
+        <p className="terminals-target">
+          Poste concerné : <strong>{selectedTerminal?.id}</strong>
+        </p>
+        <Field label="Motif administratif" required htmlFor="terminal-action-reason" className="mb-0">
+          <textarea
+            id="terminal-action-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            className="input-field"
+            placeholder="Expliquez la raison de cette commande…"
+            required
+          />
+        </Field>
+      </Modal>
     </div>
   );
 };

@@ -1,19 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Truck,
-  Plus,
-  Search,
-  Phone,
-  Mail,
-  MapPin,
-  RefreshCw,
-  AlertCircle,
-  Building,
-  DollarSign,
-} from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Truck, Plus, RefreshCw, Building2, HandCoins, SearchX } from 'lucide-react';
 import { ApiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  IconButton,
+  KpiCard,
+  Modal,
+  PageToolbar,
+  SearchInput,
+  Spinner,
+  StatusBadge,
+  TableSkeleton,
+} from '../components/ui';
+import { formatMoney, formatNumber } from '../lib/format';
 
 interface SupplierItem {
   id: string;
@@ -32,37 +36,52 @@ interface SupplierItem {
 export const SuppliersPage: React.FC = () => {
   const { organization } = useAuth();
   const { success, error } = useToast();
+  const primaryCurrency = organization?.settings?.primaryCurrency || 'CDF';
 
   const [suppliers, setSuppliers] = useState<SupplierItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const hasLoadedOnce = useRef(false);
 
-  const [formData, setFormData] = useState({
+  const emptyForm = () => ({
     name: '',
     contactPerson: '',
     email: '',
     phone: '',
     address: '',
-    currency: organization?.settings?.primaryCurrency || 'CDF',
+    currency: primaryCurrency,
     outstandingDebt: 0,
   });
+  const [formData, setFormData] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
   const fetchSuppliers = async () => {
-    setLoading(true);
+    if (hasLoadedOnce.current) setRefreshing(true);
+    else setLoading(true);
     try {
       const data = await ApiClient.getSuppliers(search || undefined);
       setSuppliers(data);
+      setLoadError('');
+      hasLoadedOnce.current = true;
     } catch (err: any) {
-      error(err.message || 'Erreur lors du chargement des fournisseurs');
+      const message = err.message || 'Erreur lors du chargement des fournisseurs';
+      if (!hasLoadedOnce.current) setLoadError(message);
+      error(message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
+  // Recherche côté serveur, déclenchée après une courte pause de frappe.
   useEffect(() => {
-    fetchSuppliers();
+    const timer = window.setTimeout(() => {
+      void fetchSuppliers();
+    }, hasLoadedOnce.current ? 300 : 0);
+    return () => window.clearTimeout(timer);
   }, [search]);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -70,17 +89,9 @@ export const SuppliersPage: React.FC = () => {
     setSaving(true);
     try {
       await ApiClient.createSupplier(formData);
-      success('Fournisseur enregistré avec succès !');
+      success('Fournisseur enregistré avec succès.');
       setShowModal(false);
-      setFormData({
-        name: '',
-        contactPerson: '',
-        email: '',
-        phone: '',
-        address: '',
-        currency: organization?.settings?.primaryCurrency || 'CDF',
-        outstandingDebt: 0,
-      });
+      setFormData(emptyForm());
       fetchSuppliers();
     } catch (err: any) {
       error(err.message || 'Erreur lors de la création');
@@ -90,196 +101,207 @@ export const SuppliersPage: React.FC = () => {
   };
 
   const totalDebt = suppliers.reduce((sum, s) => sum + Number(s.outstandingDebt || 0), 0);
+  const activeCount = suppliers.filter((s) => s.isActive).length;
+  const indebtedCount = suppliers.filter((s) => Number(s.outstandingDebt) > 0).length;
+
+  const renderTable = () => {
+    if (loading) return <TableSkeleton rows={5} columns={5} />;
+
+    if (loadError && suppliers.length === 0) {
+      return <ErrorState title="Impossible de charger les fournisseurs" message={loadError} onRetry={fetchSuppliers} />;
+    }
+
+    if (suppliers.length === 0) {
+      return search ? (
+        <EmptyState
+          icon={SearchX}
+          title="Aucun résultat"
+          description={`Aucun fournisseur ne correspond à « ${search} ».`}
+          action={<Button onClick={() => setSearch('')}>Effacer la recherche</Button>}
+        />
+      ) : (
+        <EmptyState
+          icon={Truck}
+          title="Aucun fournisseur enregistré"
+          description="Enregistrez vos fournisseurs pour suivre vos achats et vos dettes d’approvisionnement."
+          action={<Button variant="primary" icon={<Plus size={15} />} onClick={() => setShowModal(true)}>Nouveau fournisseur</Button>}
+        />
+      );
+    }
+
+    return (
+      <div className="table-container">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Fournisseur</th>
+              <th>Contact</th>
+              <th>Adresse</th>
+              <th>Statut</th>
+              <th className="col-amount">Dette en cours</th>
+            </tr>
+          </thead>
+          <tbody>
+            {suppliers.map((s) => {
+              const debt = Number(s.outstandingDebt) || 0;
+              return (
+                <tr key={s.id}>
+                  <td>
+                    <span className="cell-primary">{s.name}</span>
+                    <span className="cell-secondary">
+                      <span className="font-mono">{s.code}</span>
+                      {s.contactPerson ? ` · ${s.contactPerson}` : ''}
+                    </span>
+                  </td>
+                  <td>
+                    {s.phone || s.email ? (
+                      <>
+                        {s.phone && <span className="nowrap">{s.phone}</span>}
+                        {s.email && <span className="cell-secondary">{s.email}</span>}
+                      </>
+                    ) : (
+                      <span className="text-tertiary">—</span>
+                    )}
+                  </td>
+                  <td>{s.address || <span className="text-tertiary">—</span>}</td>
+                  <td>
+                    <StatusBadge tone={s.isActive ? 'success' : 'neutral'} dot>
+                      {s.isActive ? 'Actif' : 'Inactif'}
+                    </StatusBadge>
+                  </td>
+                  <td className={`col-amount${debt > 0 ? ' text-danger' : ''}`}>
+                    {formatMoney(debt, s.currency)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
-    <div className="page-container">
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Truck size={26} color="#1E40AF" /> Gestion des Fournisseurs & Approvisionnements
-          </h1>
-          <p className="page-subtitle">
-            Suivi des partenaires commerciaux, réceptions d'achats et dettes fournisseurs.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={fetchSuppliers} className="btn-secondary" title="Actualiser">
-            <RefreshCw size={16} />
-          </button>
-          <button onClick={() => setShowModal(true)} className="btn-primary">
-            <Plus size={16} /> Nouveau Fournisseur
-          </button>
-        </div>
+    <div className="page">
+      <PageToolbar
+        start={(
+          <>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Rechercher par nom, code, contact ou téléphone…"
+              aria-label="Rechercher un fournisseur"
+              width={360}
+            />
+            {refreshing && <Spinner size="sm" label="Recherche en cours" />}
+          </>
+        )}
+        end={(
+          <>
+            <IconButton icon={<RefreshCw />} variant="secondary" aria-label="Actualiser la liste" onClick={fetchSuppliers} />
+            <Button variant="primary" icon={<Plus size={15} />} onClick={() => setShowModal(true)}>
+              Nouveau fournisseur
+            </Button>
+          </>
+        )}
+      />
+
+      <div className="kpi-grid">
+        <KpiCard
+          label="Fournisseurs actifs"
+          value={formatNumber(activeCount)}
+          icon={Building2}
+          tone="primary"
+          hint={`${formatNumber(suppliers.length)} fiche(s) au total`}
+          loading={loading}
+        />
+        <KpiCard
+          label="Dettes fournisseurs"
+          value={formatMoney(totalDebt, primaryCurrency)}
+          icon={HandCoins}
+          tone={totalDebt > 0 ? 'danger' : 'success'}
+          valueTone={totalDebt > 0 ? 'danger' : undefined}
+          hint={indebtedCount > 0 ? `${formatNumber(indebtedCount)} fournisseur(s) à régler` : 'Aucune dette en cours'}
+          loading={loading}
+        />
       </div>
 
-      {/* KPI Dettes Fournisseurs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-        <div className="card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '13px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Building size={16} /> Total Fournisseurs Actifs
-          </div>
-          <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '8px' }}>
-            {suppliers.filter((s) => s.isActive).length}
-          </div>
-        </div>
+      <div className="table-wrapper">{renderTable()}</div>
 
-        <div className="card" style={{ padding: '16px', borderLeft: '4px solid #DC2626' }}>
-          <div style={{ fontSize: '13px', color: '#64748B', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <DollarSign size={16} color="#DC2626" /> Dettes Fournisseurs Restantes
-          </div>
-          <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '8px', color: '#DC2626' }}>
-            {totalDebt.toLocaleString('fr-FR')} {organization?.settings?.primaryCurrency || 'CDF'}
-          </div>
-        </div>
-      </div>
-
-      {/* Barre de recherche */}
-      <div className="card" style={{ padding: '16px', marginBottom: '20px' }}>
-        <div style={{ position: 'relative' }}>
-          <Search size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: '#94A3B8' }} />
+      <Modal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        title="Nouveau fournisseur"
+        description="Les coordonnées servent aux bons de commande et au suivi des dettes d’achat."
+        icon={Truck}
+        busy={saving}
+        onSubmit={handleCreate}
+        footer={(
+          <>
+            <Button onClick={() => setShowModal(false)} disabled={saving}>Annuler</Button>
+            <Button type="submit" variant="primary" loading={saving} loadingText="Enregistrement…">
+              Enregistrer
+            </Button>
+          </>
+        )}
+      >
+        <Field label="Raison sociale" required htmlFor="supplier-name">
           <input
+            id="supplier-name"
             type="text"
-            className="input"
-            placeholder="Rechercher par nom, code, personne de contact, téléphone..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ paddingLeft: '40px' }}
+            required
+            className="input-field"
+            placeholder="Ex. Distributeur officiel Congo"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           />
+        </Field>
+
+        <Field label="Personne de contact" htmlFor="supplier-contact">
+          <input
+            id="supplier-contact"
+            type="text"
+            className="input-field"
+            placeholder="Nom du commercial ou du gérant"
+            value={formData.contactPerson}
+            onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
+          />
+        </Field>
+
+        <div className="form-grid">
+          <Field label="Téléphone" htmlFor="supplier-phone">
+            <input
+              id="supplier-phone"
+              type="tel"
+              className="input-field"
+              placeholder="+243 …"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            />
+          </Field>
+          <Field label="E-mail" htmlFor="supplier-email">
+            <input
+              id="supplier-email"
+              type="email"
+              className="input-field"
+              placeholder="contact@fournisseur.cd"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            />
+          </Field>
         </div>
-      </div>
 
-      {/* Liste des fournisseurs */}
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '50px' }}>Chargement des fournisseurs...</div>
-      ) : suppliers.length === 0 ? (
-        <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
-          <AlertCircle size={36} color="#94A3B8" style={{ margin: '0 auto 10px' }} />
-          <p>Aucun fournisseur trouvé.</p>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
-          {suppliers.map((s) => (
-            <div key={s.id} className="card" style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                <div>
-                  <span style={{ fontSize: '11px', fontWeight: 700, background: '#EFF6FF', color: '#1E40AF', padding: '2px 6px', borderRadius: '4px' }}>
-                    {s.code}
-                  </span>
-                  <h3 style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600 }}>{s.name}</h3>
-                  {s.contactPerson && (
-                    <div style={{ fontSize: '12px', color: '#64748B' }}>Contact : {s.contactPerson}</div>
-                  )}
-                </div>
-              </div>
-
-              <div style={{ fontSize: '13px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '6px', margin: '12px 0' }}>
-                {s.phone && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Phone size={13} color="#94A3B8" /> {s.phone}
-                  </div>
-                )}
-                {s.email && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Mail size={13} color="#94A3B8" /> {s.email}
-                  </div>
-                )}
-                {s.address && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <MapPin size={13} color="#94A3B8" /> {s.address}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ background: '#F8FAFC', padding: '10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: '#64748B' }}>Dette en cours :</span>
-                <span style={{ fontSize: '14px', fontWeight: 700, color: Number(s.outstandingDebt) > 0 ? '#DC2626' : '#16A34A' }}>
-                  {Number(s.outstandingDebt).toLocaleString('fr-FR')} {s.currency}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Modal Création Fournisseur */}
-      {showModal && (
-        <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: '480px' }}>
-            <div className="modal-header">
-              <h2>Enregistrer un Fournisseur</h2>
-              <button onClick={() => setShowModal(false)} className="btn-close">×</button>
-            </div>
-            <form onSubmit={handleCreate}>
-              <div className="form-group">
-                <label className="label">Nom de l'Entreprise Fournisseur *</label>
-                <input
-                  type="text"
-                  required
-                  className="input"
-                  placeholder="Ex: Distributeur Officiel Congo"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="label">Personne de Contact</label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="Nom du commercial ou gérant"
-                  value={formData.contactPerson}
-                  onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div className="form-group">
-                  <label className="label">Téléphone</label>
-                  <input
-                    type="tel"
-                    className="input"
-                    placeholder="+243 ..."
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label">Email</label>
-                  <input
-                    type="email"
-                    className="input"
-                    placeholder="contact@fournisseur.cd"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="label">Adresse Physique</label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="Kinshasa, Gombe / Limete..."
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                />
-              </div>
-
-              <div className="modal-actions" style={{ marginTop: '20px' }}>
-                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">
-                  Annuler
-                </button>
-                <button type="submit" disabled={saving} className="btn-primary">
-                  {saving ? 'Enregistrement...' : 'Enregistrer'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+        <Field label="Adresse" htmlFor="supplier-address">
+          <input
+            id="supplier-address"
+            type="text"
+            className="input-field"
+            placeholder="Kinshasa, Gombe / Limete…"
+            value={formData.address}
+            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+          />
+        </Field>
+      </Modal>
     </div>
   );
 };

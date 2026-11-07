@@ -1,24 +1,43 @@
-import React, { useEffect, useState } from 'react';
-import { ApiClient } from '../api/client';
+import React, { useEffect, useRef, useState } from 'react';
 import { formatCurrency } from '@smart-pme/shared';
-import { Users, Plus, Search, Phone, Mail, MapPin, X, AlertTriangle, RefreshCw, Receipt, Pencil, Trash2 } from 'lucide-react';
+import { Users, Plus, RefreshCw, Pencil, Trash2, SearchX, UserRound, Wallet, OctagonAlert } from 'lucide-react';
+import { ApiClient } from '../api/client';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  IconButton,
+  KpiCard,
+  Modal,
+  PageToolbar,
+  SearchInput,
+  Spinner,
+  StatusBadge,
+  TableSkeleton,
+  useConfirm,
+} from '../components/ui';
+import { formatNumber } from '../lib/format';
 
 export const CustomersPage: React.FC = () => {
   const { user } = useAuth();
   const { success, error: toastError } = useToast();
+  const confirm = useConfirm();
   const canManage = user?.role === 'ORG_OWNER' || user?.role === 'MANAGER' || user?.role === 'SUPER_ADMIN';
 
   const [customers, setCustomers] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<any | null>(null);
-  const [deleteConfirmCustomer, setDeleteConfirmCustomer] = useState<any | null>(null);
+  const hasLoadedOnce = useRef(false);
 
-  // Formulaire
+  // Formulaire (création et modification)
   const [formName, setFormName] = useState('');
   const [formCompany, setFormCompany] = useState('');
   const [formPhone, setFormPhone] = useState('');
@@ -30,25 +49,27 @@ export const CustomersPage: React.FC = () => {
 
   const loadCustomers = async () => {
     try {
-      setLoading(true);
+      if (hasLoadedOnce.current) setRefreshing(true);
+      else setLoading(true);
       setLoadError(null);
       const res = await ApiClient.getCustomers(search);
       setCustomers(res);
+      hasLoadedOnce.current = true;
     } catch (err: any) {
       setLoadError(err.message || 'Impossible de charger les clients.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
+  // Recherche côté serveur après une courte pause de frappe.
   useEffect(() => {
-    loadCustomers();
-  }, []);
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    loadCustomers();
-  };
+    const timer = window.setTimeout(() => {
+      void loadCustomers();
+    }, hasLoadedOnce.current ? 300 : 0);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const resetForm = () => {
     setFormName('');
@@ -58,6 +79,17 @@ export const CustomersPage: React.FC = () => {
     setFormAddress('');
     setFormCreditLimit('');
     setFormError(null);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setShowAddModal(true);
+  };
+
+  const closeForm = () => {
+    setShowAddModal(false);
+    setEditingCustomer(null);
+    resetForm();
   };
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
@@ -78,9 +110,9 @@ export const CustomersPage: React.FC = () => {
         creditLimit: parseFloat(formCreditLimit) || 0,
         currency: 'CDF',
       });
-      setShowAddModal(false);
-      resetForm();
-      success(`Client « ${formName} » enregistré avec succès.`);
+      const name = formName;
+      closeForm();
+      success(`Client « ${name} » enregistré avec succès.`);
       loadCustomers();
     } catch (err: any) {
       setFormError(err.message || 'Erreur lors de la création du client.');
@@ -120,9 +152,8 @@ export const CustomersPage: React.FC = () => {
         address: formAddress.trim() || undefined,
         creditLimit: parseFloat(formCreditLimit) || 0,
       });
-      setEditingCustomer(null);
-      resetForm();
-      success(`Client mis à jour avec succès.`);
+      closeForm();
+      success('Client mis à jour avec succès.');
       loadCustomers();
     } catch (err: any) {
       setFormError(err.message || 'Erreur lors de la modification.');
@@ -131,473 +162,258 @@ export const CustomersPage: React.FC = () => {
     }
   };
 
-  const handleDeleteCustomer = async () => {
-    if (!deleteConfirmCustomer) return;
-    setSubmitting(true);
+  const handleDeleteCustomer = async (customer: any) => {
+    const confirmed = await confirm({
+      title: `Supprimer le client « ${customer.name} » ?`,
+      message: 'Si ce client possède déjà des factures ou des règlements, sa fiche sera archivée pour préserver l’intégrité comptable.',
+      confirmLabel: 'Supprimer',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     try {
-      await ApiClient.deleteCustomer(deleteConfirmCustomer.id);
-      success(`Client supprimé avec succès.`);
-      setDeleteConfirmCustomer(null);
+      await ApiClient.deleteCustomer(customer.id);
+      success('Client supprimé avec succès.');
       loadCustomers();
     } catch (err: any) {
       toastError(err.message || 'Impossible de supprimer ce client.');
-    } finally {
-      setSubmitting(false);
     }
   };
 
-  return (
-    <div>
-      <div className="table-wrapper">
-        <div className="table-toolbar">
-          <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px', flex: 1, maxWidth: '480px' }}>
-            <div className="input-with-icon" style={{ flex: 1 }}>
-              <Search size={14} className="input-icon" />
-              <input
-                type="text"
-                placeholder="Rechercher un client, société, téléphone..."
-                className="input-field"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <button type="submit" className="btn btn-secondary">
-              <Search size={13} /> Rechercher
-            </button>
-          </form>
+  const withBalance = customers.filter((c) => Number(c.outstandingBalance || 0) > 0).length;
+  const overLimit = customers.filter((c) => {
+    const limit = Number(c.creditLimit || 0);
+    return limit > 0 && Number(c.outstandingBalance || 0) > limit;
+  }).length;
 
-          <div className="table-toolbar-actions">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={loadCustomers}>
-              <RefreshCw size={13} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => { resetForm(); setShowAddModal(true); }}
-            >
-              <Plus size={14} />
-              Nouveau client
-            </button>
-          </div>
-        </div>
+  const isEditing = Boolean(editingCustomer);
+  const formOpen = showAddModal || isEditing;
 
-        <div className="table-container">
-          {loading ? (
-            <div className="loading-state">
-              <div className="spinner" />
-              <span>Chargement...</span>
-            </div>
-          ) : loadError ? (
-            <div className="table-empty">
-              <div className="table-empty-title" style={{ color: '#DC2626' }}>Erreur de chargement</div>
-              <div className="table-empty-sub">{loadError}</div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={loadCustomers}>
-                <RefreshCw size={12} /> Réessayer
-              </button>
-            </div>
-          ) : customers.length === 0 ? (
-            <div className="table-empty">
-              <Users className="table-empty-icon" />
-              <div className="table-empty-title">Aucun client trouvé</div>
-              <div className="table-empty-sub">
-                {search
-                  ? 'Aucun résultat pour cette recherche.'
-                  : 'Aucun client enregistré. Créez votre premier client.'}
-              </div>
-              {!search && (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => { resetForm(); setShowAddModal(true); }}
-                >
-                  <Plus size={13} /> Créer un client
-                </button>
-              )}
-            </div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Nom / Société</th>
-                  <th>Téléphone</th>
-                  <th>E-mail</th>
-                  <th>Adresse</th>
-                  <th className="col-amount">Limite crédit</th>
-                  <th className="col-amount">En-cours</th>
-                  <th>Statut</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
+  const renderTable = () => {
+    if (loading) return <TableSkeleton rows={6} columns={7} />;
+
+    if (loadError && customers.length === 0) {
+      return <ErrorState title="Impossible de charger les clients" message={loadError} onRetry={loadCustomers} />;
+    }
+
+    if (customers.length === 0) {
+      return search ? (
+        <EmptyState
+          icon={SearchX}
+          title="Aucun résultat"
+          description={`Aucun client ne correspond à « ${search} ».`}
+          action={<Button onClick={() => setSearch('')}>Effacer la recherche</Button>}
+        />
+      ) : (
+        <EmptyState
+          icon={Users}
+          title="Aucun client enregistré"
+          description="Créez vos fiches clients pour suivre leurs achats, leurs encours et leur limite de crédit."
+          action={<Button variant="primary" icon={<Plus size={15} />} onClick={openCreate}>Nouveau client</Button>}
+        />
+      );
+    }
+
+    return (
+      <div className="table-container">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Client</th>
+              <th>Contact</th>
+              <th>Adresse</th>
+              <th className="col-amount">Limite de crédit</th>
+              <th className="col-amount">Encours</th>
+              <th>Situation</th>
+              {canManage && <th className="col-actions">Actions</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {customers.map((c: any) => {
+              const outstanding = Number(c.outstandingBalance || 0);
+              const limit = Number(c.creditLimit || 0);
+              const exceeded = limit > 0 && outstanding > limit;
+              return (
+                <tr key={c.id}>
+                  <td className="col-mono">{c.code}</td>
+                  <td>
+                    <span className="cell-primary">{c.name}</span>
+                    {c.companyName && <span className="cell-secondary">{c.companyName}</span>}
+                  </td>
+                  <td>
+                    {c.phone || c.email ? (
+                      <>
+                        {c.phone && <span className="nowrap">{c.phone}</span>}
+                        {c.email && <span className="cell-secondary">{c.email}</span>}
+                      </>
+                    ) : <span className="text-tertiary">—</span>}
+                  </td>
+                  <td>
+                    {c.address ? <span className="truncate" style={{ display: 'block', maxWidth: 200 }} title={c.address}>{c.address}</span> : <span className="text-tertiary">—</span>}
+                  </td>
+                  <td className="col-amount">
+                    {limit > 0 ? formatCurrency(limit, c.currency || 'CDF') : <span className="text-tertiary">Sans crédit</span>}
+                  </td>
+                  <td className={`col-amount${exceeded ? ' text-danger' : ''}`}>
+                    {formatCurrency(outstanding, c.currency || 'CDF')}
+                  </td>
+                  <td>
+                    {exceeded ? (
+                      <StatusBadge tone="danger" dot>Plafond dépassé</StatusBadge>
+                    ) : outstanding > 0 ? (
+                      <StatusBadge tone="warning" dot>Encours</StatusBadge>
+                    ) : (
+                      <StatusBadge tone="success" dot>À jour</StatusBadge>
+                    )}
+                  </td>
+                  {canManage && (
+                    <td className="col-actions">
+                      <IconButton icon={<Pencil />} size="sm" aria-label={`Modifier ${c.name}`} title="Modifier" onClick={() => handleOpenEdit(c)} />
+                      <IconButton icon={<Trash2 />} size="sm" variant="danger" aria-label={`Supprimer ${c.name}`} title="Supprimer" onClick={() => handleDeleteCustomer(c)} />
+                    </td>
+                  )}
                 </tr>
-              </thead>
-              <tbody>
-                {customers.map((c: any) => {
-                  const outstanding = Number(c.outstandingBalance || 0);
-                  const limit = Number(c.creditLimit || 0);
-                  const exceeded = limit > 0 && outstanding > limit;
-                  return (
-                    <tr key={c.id}>
-                      <td className="col-mono">{c.code}</td>
-                      <td>
-                        <div style={{ fontWeight: 600, color: '#111827' }}>{c.name}</div>
-                        {c.companyName && (
-                          <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>{c.companyName}</div>
-                        )}
-                      </td>
-                      <td>
-                        {c.phone ? (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8125rem' }}>
-                            <Phone size={12} color="#6B7280" /> {c.phone}
-                          </span>
-                        ) : <span className="text-tertiary">—</span>}
-                      </td>
-                      <td>
-                        {c.email ? (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8125rem' }}>
-                            <Mail size={12} color="#6B7280" /> {c.email}
-                          </span>
-                        ) : <span className="text-tertiary">—</span>}
-                      </td>
-                      <td>
-                        {c.address ? (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8125rem', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <MapPin size={12} color="#6B7280" /> {c.address}
-                          </span>
-                        ) : <span className="text-tertiary">—</span>}
-                      </td>
-                      <td className="col-amount">
-                        {limit > 0 ? formatCurrency(limit, c.currency || 'CDF') : <span className="text-tertiary">—</span>}
-                      </td>
-                      <td className="col-amount" style={{ color: exceeded ? '#DC2626' : '#111827', fontWeight: 600 }}>
-                        {formatCurrency(outstanding, c.currency || 'CDF')}
-                      </td>
-                      <td>
-                        {exceeded ? (
-                          <span className="badge badge-danger">Dépassé</span>
-                        ) : outstanding > 0 ? (
-                          <span className="badge badge-warning">En-cours</span>
-                        ) : (
-                          <span className="badge badge-success">À jour</span>
-                        )}
-                      </td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        {canManage ? (
-                          <div style={{ display: 'inline-flex', gap: '4px' }}>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-secondary"
-                              onClick={() => handleOpenEdit(c)}
-                              title="Modifier ce client"
-                              style={{ padding: '4px 8px' }}
-                            >
-                              <Pencil size={13} />
-                              <span>Modifier</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-danger"
-                              onClick={() => setDeleteConfirmCustomer(c)}
-                              title="Supprimer ce client"
-                              style={{ padding: '4px 8px' }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-tertiary" style={{ fontSize: '0.75rem' }}>Lecture seule</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  return (
+    <div className="page">
+      <PageToolbar
+        start={(
+          <>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Rechercher un client, une société, un téléphone…"
+              aria-label="Rechercher un client"
+              width={360}
+            />
+            {refreshing && <Spinner size="sm" label="Recherche en cours" />}
+          </>
+        )}
+        end={(
+          <>
+            <IconButton icon={<RefreshCw />} variant="secondary" aria-label="Actualiser la liste" onClick={loadCustomers} />
+            <Button variant="primary" icon={<Plus size={15} />} onClick={openCreate}>
+              Nouveau client
+            </Button>
+          </>
+        )}
+      />
+
+      <div className="kpi-grid">
+        <KpiCard label="Clients" value={formatNumber(customers.length)} icon={UserRound} tone="primary" hint={search ? 'Résultats de la recherche' : 'Fiches enregistrées'} loading={loading} />
+        <KpiCard label="Avec encours" value={formatNumber(withBalance)} icon={Wallet} tone="warning" hint="Clients ayant un solde à régler" loading={loading} />
+        <KpiCard
+          label="Plafond dépassé"
+          value={formatNumber(overLimit)}
+          icon={OctagonAlert}
+          tone="danger"
+          valueTone={overLimit > 0 ? 'danger' : undefined}
+          hint="Encours supérieur à la limite de crédit"
+          loading={loading}
+        />
       </div>
 
-      {/* Modal ajout client */}
-      {showAddModal && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <span className="modal-title">Nouveau client</span>
-              <button
-                type="button"
-                className="btn-close"
-                onClick={() => { setShowAddModal(false); resetForm(); }}
-                aria-label="Fermer"
-              >
-                <X size={18} />
-              </button>
-            </div>
+      <div className="table-wrapper">{renderTable()}</div>
 
-            <form onSubmit={handleCreateCustomer}>
-              <div className="modal-body">
-                {formError && (
-                  <div className="alert alert-danger" style={{ marginBottom: '16px' }}>
-                    <AlertTriangle size={14} className="alert-icon" />
-                    <span>{formError}</span>
-                  </div>
-                )}
+      <Modal
+        open={formOpen}
+        onClose={closeForm}
+        title={isEditing ? 'Modifier le client' : 'Nouveau client'}
+        description={isEditing ? editingCustomer?.name : 'La limite de crédit autorise ou non la vente à crédit pour ce client.'}
+        icon={isEditing ? Pencil : UserRound}
+        busy={submitting}
+        onSubmit={isEditing ? handleUpdateCustomer : handleCreateCustomer}
+        footer={(
+          <>
+            <Button onClick={closeForm} disabled={submitting}>Annuler</Button>
+            <Button type="submit" variant="primary" loading={submitting} loadingText="Enregistrement…">
+              {isEditing ? 'Enregistrer les modifications' : 'Enregistrer le client'}
+            </Button>
+          </>
+        )}
+      >
+        {formError && <Alert tone="danger">{formError}</Alert>}
+        <div>
+          <Field label="Nom complet ou raison sociale" required htmlFor="cust-name">
+            <input
+              id="cust-name"
+              type="text"
+              required
+              className="input-field"
+              placeholder="Prénom et nom, ou dénomination"
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+            />
+          </Field>
 
-                <div className="form-group">
-                  <label className="form-label" htmlFor="cust-name">
-                    Nom complet <span className="required">*</span>
-                  </label>
-                  <input
-                    id="cust-name"
-                    type="text"
-                    required
-                    className="input-field"
-                    placeholder="Prénom Nom ou dénomination"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                  />
-                </div>
+          <Field label="Société" hint="Facultatif" htmlFor="cust-company">
+            <input
+              id="cust-company"
+              type="text"
+              className="input-field"
+              value={formCompany}
+              onChange={(e) => setFormCompany(e.target.value)}
+            />
+          </Field>
 
-                <div className="form-group">
-                  <label className="form-label" htmlFor="cust-company">Société / Organisation</label>
-                  <input
-                    id="cust-company"
-                    type="text"
-                    className="input-field"
-                    placeholder="Raison sociale (optionnel)"
-                    value={formCompany}
-                    onChange={(e) => setFormCompany(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="cust-phone">Téléphone</label>
-                    <input
-                      id="cust-phone"
-                      type="tel"
-                      className="input-field"
-                      placeholder="+243 8X XXX XXXX"
-                      value={formPhone}
-                      onChange={(e) => setFormPhone(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="cust-email">Adresse e-mail</label>
-                    <input
-                      id="cust-email"
-                      type="email"
-                      className="input-field"
-                      placeholder="client@exemple.cd"
-                      value={formEmail}
-                      onChange={(e) => setFormEmail(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="cust-address">Adresse physique</label>
-                  <input
-                    id="cust-address"
-                    type="text"
-                    className="input-field"
-                    placeholder="Commune, Avenue, N°..."
-                    value={formAddress}
-                    onChange={(e) => setFormAddress(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="cust-credit">Limite de crédit (CDF)</label>
-                  <input
-                    id="cust-credit"
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="input-field"
-                    placeholder="0 = pas de crédit"
-                    value={formCreditLimit}
-                    onChange={(e) => setFormCreditLimit(e.target.value)}
-                  />
-                  <div className="form-hint">Laisser à 0 pour désactiver la vente à crédit pour ce client.</div>
-                </div>
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => { setShowAddModal(false); resetForm(); }}
-                >
-                  Annuler
-                </button>
-                <button type="submit" disabled={submitting} className="btn btn-primary">
-                  {submitting ? (
-                    <>
-                      <span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
-                      Enregistrement...
-                    </>
-                  ) : 'Enregistrer le client'}
-                </button>
-              </div>
-            </form>
+          <div className="form-grid">
+            <Field label="Téléphone" htmlFor="cust-phone">
+              <input
+                id="cust-phone"
+                type="tel"
+                className="input-field"
+                placeholder="+243 8X XXX XXXX"
+                value={formPhone}
+                onChange={(e) => setFormPhone(e.target.value)}
+              />
+            </Field>
+            <Field label="E-mail" htmlFor="cust-email">
+              <input
+                id="cust-email"
+                type="email"
+                className="input-field"
+                placeholder="client@exemple.cd"
+                value={formEmail}
+                onChange={(e) => setFormEmail(e.target.value)}
+              />
+            </Field>
           </div>
+
+          <Field label="Adresse" htmlFor="cust-address">
+            <input
+              id="cust-address"
+              type="text"
+              className="input-field"
+              placeholder="Commune, avenue, numéro…"
+              value={formAddress}
+              onChange={(e) => setFormAddress(e.target.value)}
+            />
+          </Field>
+
+          <Field label="Limite de crédit" hint="Laissez 0 pour interdire la vente à crédit à ce client." htmlFor="cust-credit" className="mb-0">
+            <div className="input-addon">
+              <input
+                id="cust-credit"
+                type="number"
+                min="0"
+                step="any"
+                className="input-field"
+                placeholder="0"
+                value={formCreditLimit}
+                onChange={(e) => setFormCreditLimit(e.target.value)}
+              />
+              <span className="input-addon-text">CDF</span>
+            </div>
+          </Field>
         </div>
-      )}
-
-      {/* Modal modification client */}
-      {editingCustomer && (
-        <div className="modal-overlay">
-          <div className="modal modal-md">
-            <div className="modal-header">
-              <span className="modal-title">Modifier le client : {editingCustomer.name}</span>
-              <button
-                type="button"
-                className="btn-close"
-                onClick={() => { setEditingCustomer(null); resetForm(); }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleUpdateCustomer}>
-              <div className="modal-body">
-                {formError && (
-                  <div className="alert alert-danger" style={{ marginBottom: '16px' }}>
-                    <AlertTriangle size={14} className="alert-icon" />
-                    <span>{formError}</span>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="edit-cust-name">
-                    Nom du client / Raison sociale <span className="required">*</span>
-                  </label>
-                  <input
-                    id="edit-cust-name"
-                    type="text"
-                    required
-                    className="input-field"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="edit-cust-company">Nom de l'entreprise (optionnel)</label>
-                  <input
-                    id="edit-cust-company"
-                    type="text"
-                    className="input-field"
-                    value={formCompany}
-                    onChange={(e) => setFormCompany(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="edit-cust-phone">Téléphone</label>
-                    <input
-                      id="edit-cust-phone"
-                      type="tel"
-                      className="input-field"
-                      value={formPhone}
-                      onChange={(e) => setFormPhone(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="edit-cust-email">Adresse e-mail</label>
-                    <input
-                      id="edit-cust-email"
-                      type="email"
-                      className="input-field"
-                      value={formEmail}
-                      onChange={(e) => setFormEmail(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="edit-cust-address">Adresse physique</label>
-                  <input
-                    id="edit-cust-address"
-                    type="text"
-                    className="input-field"
-                    value={formAddress}
-                    onChange={(e) => setFormAddress(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="edit-cust-credit">Limite de crédit autorisée (CDF)</label>
-                  <input
-                    id="edit-cust-credit"
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="input-field"
-                    value={formCreditLimit}
-                    onChange={(e) => setFormCreditLimit(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => { setEditingCustomer(null); resetForm(); }}
-                >
-                  Annuler
-                </button>
-                <button type="submit" disabled={submitting} className="btn btn-primary">
-                  {submitting ? 'Enregistrement...' : 'Enregistrer les modifications'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal confirmation suppression client */}
-      {deleteConfirmCustomer && (
-        <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth: '420px' }}>
-            <div className="modal-header">
-              <span className="modal-title">Confirmer la suppression</span>
-              <button
-                type="button"
-                className="btn-close"
-                onClick={() => setDeleteConfirmCustomer(null)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <p style={{ margin: 0, fontSize: '0.875rem', color: '#374151', lineHeight: '1.5' }}>
-                Êtes-vous certain de vouloir supprimer le client <strong>« {deleteConfirmCustomer.name} »</strong> ?
-              </p>
-              <div style={{ marginTop: '12px', fontSize: '0.75rem', color: '#6B7280' }}>
-                Note : Si ce client possède déjà des factures ou des règlements, sa fiche sera archivée pour préserver l'intégrité comptable.
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setDeleteConfirmCustomer(null)}
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger"
-                disabled={submitting}
-                onClick={handleDeleteCustomer}
-              >
-                {submitting ? 'Suppression...' : 'Supprimer'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   );
 };

@@ -1,0 +1,61 @@
+/* Page Postes de travail */
+.terminals-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.terminals-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.terminals-live.is-live {
+  color: #15803D;
+}
+
+.terminals-live.is-live .terminals-live-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
+  animation: pulse 2s infinite;
+}
+
+.terminals-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.terminals-table tr.is-locked td {
+  background: var(--warning-bg);
+}
+
+.terminals-ack {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 0.6875rem;
+  color: #B45309;
+  white-space: nowrap;
+}
+
+.terminals-ack.is-applied {
+  color: #15803D;
+}
+
+.terminals-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.terminals-target {
+  margin-bottom: var(--space-3);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}

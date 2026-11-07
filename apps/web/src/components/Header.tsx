@@ -1,20 +1,41 @@
 import React, { useEffect, useState } from 'react';
-import { Wallet, DollarSign, Plus, Wifi, WifiOff, RefreshCw, Edit3, X, Check, AlertTriangle } from 'lucide-react';
+import {
+  Wallet,
+  DollarSign,
+  Plus,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  PenLine,
+  AlertTriangle,
+  Menu,
+  RotateCcw,
+  Archive,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { offlineSync } from '../services/offlineSync';
+import { Modal } from './ui/Modal';
+import { Button } from './ui/Button';
+import { IconButton } from './ui/IconButton';
+import { EmptyState } from './ui/EmptyState';
+import { formatDateTime, formatNumber } from '../lib/format';
 
 interface HeaderProps {
   title: string;
   subtitle?: string;
   onNewSaleClick?: () => void;
+  onMenuClick?: () => void;
   activeSession?: any;
 }
+
+const RATE_PRESETS = [2800, 2850, 2860, 2870, 2900];
 
 export const Header: React.FC<HeaderProps> = ({
   title,
   subtitle,
   onNewSaleClick,
+  onMenuClick,
   activeSession,
 }) => {
   const { organization, user, updateExchangeRate } = useAuth();
@@ -100,23 +121,31 @@ export const Header: React.FC<HeaderProps> = ({
     setConflictLog(await offlineSync.getConflictLog());
   };
 
-  const offlineStatusColor = pendingReviewCount > 0 || pendingSyncError
-    ? { background: '#FEF2F2', border: '#FECACA', color: '#991B1B' }
+  const syncTone = pendingReviewCount > 0 || pendingSyncError
+    ? 'danger'
     : !isOnline
-      ? { background: '#FEF3C7', border: '#FCD34D', color: '#92400E' }
+      ? 'warning'
       : isSyncing
-        ? { background: '#EFF6FF', border: '#BFDBFE', color: '#1D4ED8' }
-        : { background: '#F0FDF4', border: '#DCFCE7', color: '#166534' };
+        ? 'info'
+        : 'success';
 
   const offlineStatusLabel = pendingReviewCount > 0
-    ? `Erreur, ${pendingReviewCount} opérations à vérifier`
+    ? `${pendingReviewCount} opération(s) à vérifier`
     : pendingSyncError
-      ? 'Erreur, file hors-ligne à vérifier'
+      ? 'File hors ligne à vérifier'
       : isSyncing
-        ? 'Synchronisation en cours'
-        : !isOnline && pendingSyncCount > 0
-          ? `Hors ligne, ${pendingSyncCount} opérations en attente`
+        ? 'Synchronisation…'
+        : !isOnline
+          ? `Hors ligne · ${pendingSyncCount} en attente`
           : 'Synchronisé';
+
+  const SyncIcon = pendingReviewCount > 0 || pendingSyncError
+    ? AlertTriangle
+    : isSyncing
+      ? RefreshCw
+      : isOnline
+        ? Wifi
+        : WifiOff;
 
   const exchangeRate = Number(organization?.settings?.exchangeRateUsdToCdf) || 2850;
 
@@ -139,284 +168,230 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
+  const rateContent = (
+    <>
+      <DollarSign size={14} aria-hidden="true" />
+      <span className="chip-label-optional">1 USD =</span>
+      <strong>{formatNumber(exchangeRate)} CDF</strong>
+      {canManageRate && <PenLine size={12} aria-hidden="true" />}
+    </>
+  );
+
+  const syncIcon = <SyncIcon size={14} aria-hidden="true" className={isSyncing ? 'animate-spin' : undefined} />;
+
   return (
     <>
       <header className="page-header">
+        {onMenuClick && (
+          <IconButton
+            className="header-menu-btn"
+            icon={<Menu />}
+            aria-label="Ouvrir le menu de navigation"
+            onClick={onMenuClick}
+          />
+        )}
+
         <div className="page-header-titles">
-          <div className="page-header-title">{title}</div>
+          <h1 className="page-header-title">{title}</h1>
           {subtitle && <div className="page-header-sub">{subtitle}</div>}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {/* Statut Réseau & Synchro Offline */}
-          <div
-            title={pendingSyncError || 'État de synchronisation des opérations commerciales'}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 10px',
-              background: offlineStatusColor.background,
-              border: `1px solid ${offlineStatusColor.border}`,
-              borderRadius: '6px',
-              fontSize: '0.75rem',
-              color: offlineStatusColor.color,
-              fontWeight: 500,
-            }}
-          >
-            {pendingReviewCount > 0
-              ? <AlertTriangle size={13} />
-              : isOnline
-                ? <Wifi size={13} />
-                : <WifiOff size={13} />}
-            {pendingReviewCount > 0 ? (
-              <button
-                type="button"
-                onClick={openOfflineReview}
-                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', font: 'inherit', padding: 0 }}
-              >
-                {offlineStatusLabel}
-              </button>
-            ) : <span>{offlineStatusLabel}</span>}
-            {pendingSyncCount > 0 && isOnline && (
-              <button
-                type="button"
-                onClick={handleManualSync}
-                disabled={isSyncing}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '0 2px',
-                  color: '#B45309',
-                }}
-                title="Synchroniser immédiatement"
-              >
-                <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-              </button>
-            )}
-          </div>
-
-          {/* Taux de change avec synchronisation en direct */}
-          <div
-            onClick={canManageRate ? handleOpenRateModal : undefined}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 10px',
-              background: '#F8FAFC',
-              border: '1px solid #E2E8F0',
-              borderRadius: '6px',
-              fontSize: '0.75rem',
-              color: '#4B5563',
-              cursor: canManageRate ? 'pointer' : 'default',
-              transition: 'all 0.15s ease',
-            }}
-            title={canManageRate ? 'Cliquer pour ajuster le taux du jour (synchronisé automatiquement)' : 'Taux officiel appliqué'}
-          >
+        <div className="header-actions">
+          {/* État réseau et synchronisation hors ligne */}
+          {pendingReviewCount > 0 ? (
+            <button
+              type="button"
+              className="chip chip-danger"
+              onClick={openOfflineReview}
+              title={pendingSyncError || 'Voir les opérations à vérifier'}
+            >
+              {syncIcon}
+              <span className="chip-label">{offlineStatusLabel}</span>
+            </button>
+          ) : (
             <span
-              style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: '#16A34A',
-                boxShadow: '0 0 0 2px rgba(22, 163, 74, 0.2)',
-                display: 'inline-block',
-              }}
-            />
-            <DollarSign size={13} color="#16A34A" />
-            <span>
-              1 USD = <strong style={{ color: '#111827' }}>{exchangeRate.toLocaleString('fr-FR')} CDF</strong>
+              className={`chip chip-${syncTone}`}
+              title={pendingSyncError || offlineStatusLabel}
+              role="status"
+            >
+              {syncIcon}
+              <span className="chip-label">{offlineStatusLabel}</span>
+              {pendingSyncCount > 0 && isOnline && (
+                <button
+                  type="button"
+                  className="chip-action"
+                  onClick={handleManualSync}
+                  disabled={isSyncing}
+                  title="Synchroniser maintenant"
+                  aria-label="Synchroniser maintenant"
+                >
+                  <RefreshCw size={12} aria-hidden="true" className={isSyncing ? 'animate-spin' : undefined} />
+                </button>
+              )}
             </span>
-            {canManageRate && (
-              <Edit3 size={11} color="#6B7280" style={{ marginLeft: '2px', opacity: 0.7 }} />
-            )}
-          </div>
+          )}
 
-          {/* Statut caisse */}
+          {/* Taux de change du jour */}
+          {canManageRate ? (
+            <button
+              type="button"
+              className="chip chip-neutral"
+              onClick={handleOpenRateModal}
+              title="Ajuster le taux du jour (appliqué partout automatiquement)"
+            >
+              {rateContent}
+            </button>
+          ) : (
+            <span className="chip chip-neutral" title="Taux officiel appliqué">
+              {rateContent}
+            </span>
+          )}
+
+          {/* Session de caisse */}
           <button
             type="button"
             onClick={() => navigate('/finances')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 10px',
-              border: '1px solid',
-              borderColor: activeSession ? '#BBF7D0' : '#FDE68A',
-              borderRadius: '6px',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              background: activeSession ? '#F0FDF4' : '#FFFBEB',
-              color: activeSession ? '#16A34A' : '#D97706',
-              fontFamily: 'inherit',
-            }}
+            className={`chip ${activeSession ? 'chip-success' : 'chip-warning'}`}
+            title={activeSession ? 'Caisse ouverte — voir la session' : 'Caisse fermée — ouvrir une session'}
           >
-            {activeSession && <span className="session-dot" />}
-            <Wallet size={13} />
-            <span>{activeSession ? 'Caisse ouverte' : 'Caisse fermée'}</span>
+            {activeSession ? <span className="chip-dot is-live" aria-hidden="true" /> : <Wallet size={14} aria-hidden="true" />}
+            <span className="chip-label">{activeSession ? 'Caisse ouverte' : 'Caisse fermée'}</span>
           </button>
 
-          {/* Nouvelle vente */}
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Plus size={15} aria-hidden="true" />}
             onClick={() => {
               if (onNewSaleClick) onNewSaleClick();
               else navigate('/sales');
             }}
-            className="btn btn-primary btn-sm"
+            title="Nouvelle vente"
           >
-            <Plus size={14} />
-            Nouvelle vente
-          </button>
+            <span className="header-new-sale-label">Nouvelle vente</span>
+          </Button>
         </div>
       </header>
 
-      {showOfflineReview && (
-        <div className="modal-overlay" onClick={() => setShowOfflineReview(false)}>
-          <div className="modal-content" style={{ maxWidth: '600px' }} onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h2 style={{ margin: 0 }}>Opérations à vérifier</h2>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowOfflineReview(false)} aria-label="Fermer">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="modal-body" style={{ display: 'grid', gap: '12px', maxHeight: '60vh', overflowY: 'auto' }}>
-              {reviewOperations.length === 0 ? (
-                <p>Aucune opération à vérifier.</p>
-              ) : reviewOperations.map((operation) => (
-                <section key={operation.id} style={{ border: '1px solid #FECACA', borderRadius: '8px', padding: '12px' }}>
-                  <strong>{operation.type}</strong>
-                  <p style={{ margin: '6px 0', color: '#991B1B' }}>{operation.lastError}</p>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button type="button" className="btn btn-primary btn-sm" onClick={() => void retryOfflineOperation(operation.id)}>
-                      Réessayer
-                    </button>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void archiveOfflineOperation(operation.id)}>
-                      Archiver avec journal
-                    </button>
-                  </div>
-                </section>
-              ))}
-              {conflictLog.length > 0 && (
-                <section>
-                  <h3>Journal des conflits</h3>
-                  {conflictLog.map((conflict) => (
-                    <div key={conflict.id} style={{ borderTop: '1px solid #E5E7EB', padding: '8px 0' }}>
-                      <strong>{conflict.operationType}</strong>
-                      <span style={{ marginLeft: '8px', color: '#6B7280' }}>
-                        {new Date(conflict.occurredAt).toLocaleString('fr-FR')} · {
-                          conflict.status === 'open' ? 'À vérifier' : conflict.status === 'resolved' ? 'Résolu' : 'Archivé'
-                        }
-                      </span>
-                      <p style={{ margin: '4px 0' }}>{conflict.message}</p>
-                    </div>
-                  ))}
-                </section>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Ajustement Rapide du Taux de Change */}
-      {showRateModal && (
-        <div className="modal-overlay" onClick={() => setShowRateModal(false)}>
-          <div
-            className="modal-content"
-            style={{ maxWidth: '440px' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <DollarSign size={20} color="#16A34A" />
-                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600 }}>
-                  Ajuster le Taux du Jour
-                </h3>
+      <Modal
+        open={showOfflineReview}
+        onClose={() => setShowOfflineReview(false)}
+        title="Opérations à vérifier"
+        description="Ces opérations enregistrées hors ligne n’ont pas pu être synchronisées automatiquement."
+        icon={AlertTriangle}
+        tone="danger"
+        size="lg"
+        footer={<Button onClick={() => setShowOfflineReview(false)}>Fermer</Button>}
+      >
+        <div className="stack">
+          {reviewOperations.length === 0 ? (
+            <EmptyState compact title="Aucune opération à vérifier" description="Toutes les opérations hors ligne ont été traitées." />
+          ) : reviewOperations.map((operation) => (
+            <section key={operation.id} className="alert alert-danger">
+              <div className="alert-content">
+                <div className="alert-title">{operation.type}</div>
+                <div className="alert-body">{operation.lastError}</div>
+                <div className="alert-actions">
+                  <Button variant="primary" size="sm" icon={<RotateCcw size={14} aria-hidden="true" />} onClick={() => void retryOfflineOperation(operation.id)}>
+                    Réessayer
+                  </Button>
+                  <Button size="sm" icon={<Archive size={14} aria-hidden="true" />} onClick={() => void archiveOfflineOperation(operation.id)}>
+                    Archiver avec journal
+                  </Button>
+                </div>
               </div>
-              <button
-                type="button"
-                className="btn-icon"
-                onClick={() => setShowRateModal(false)}
+            </section>
+          ))}
+
+          {conflictLog.length > 0 && (
+            <section className="stack-sm">
+              <h3 className="page-section-title">Journal des conflits</h3>
+              <div className="table-wrapper">
+                <div className="table-container">
+                  <table className="data-table data-table-compact">
+                    <thead>
+                      <tr>
+                        <th>Opération</th>
+                        <th>Date</th>
+                        <th>Statut</th>
+                        <th>Détail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {conflictLog.map((conflict) => (
+                        <tr key={conflict.id}>
+                          <td className="cell-primary">{conflict.operationType}</td>
+                          <td className="nowrap">{formatDateTime(conflict.occurredAt)}</td>
+                          <td>
+                            <span className={`badge ${conflict.status === 'open' ? 'badge-warning' : conflict.status === 'resolved' ? 'badge-success' : 'badge-neutral'}`}>
+                              {conflict.status === 'open' ? 'À vérifier' : conflict.status === 'resolved' ? 'Résolu' : 'Archivé'}
+                            </span>
+                          </td>
+                          <td>{conflict.message}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        open={showRateModal}
+        onClose={() => setShowRateModal(false)}
+        title="Ajuster le taux du jour"
+        description="La modification s’applique immédiatement sur le web, l’application de bureau et tous les postes de caisse."
+        icon={DollarSign}
+        tone="success"
+        size="sm"
+        busy={isSubmittingRate}
+        onSubmit={handleSaveRate}
+        footer={(
+          <>
+            <Button onClick={() => setShowRateModal(false)} disabled={isSubmittingRate}>
+              Annuler
+            </Button>
+            <Button type="submit" variant="primary" loading={isSubmittingRate} loadingText="Application…">
+              Appliquer partout
+            </Button>
+          </>
+        )}
+      >
+        <div className="form-group mb-0">
+          <label className="form-label" htmlFor="exchange-rate-input">
+            Valeur de 1 USD en francs congolais
+          </label>
+          <div className="input-addon">
+            <input
+              id="exchange-rate-input"
+              type="number"
+              step="1"
+              min="1"
+              className="input-field"
+              value={newRateInput}
+              onChange={(e) => setNewRateInput(e.target.value)}
+              placeholder="Ex. 2850"
+              required
+            />
+            <span className="input-addon-text">CDF</span>
+          </div>
+          <div className="cluster-sm" style={{ marginTop: 'var(--space-3)' }} aria-label="Taux usuels">
+            {RATE_PRESETS.map((preset) => (
+              <Button
+                key={preset}
+                size="xs"
+                variant={Number(newRateInput) === preset ? 'primary' : 'secondary'}
+                onClick={() => setNewRateInput(preset.toString())}
               >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveRate}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: '#4B5563', lineHeight: 1.4 }}>
-                  Toute modification sera <strong>détectée et appliquée automatiquement</strong> en direct sur l'application Web, Desktop et tous les terminaux de caisse.
-                </p>
-
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontWeight: 600 }}>
-                    Valeur de 1 USD en Francs Congolais (CDF)
-                  </label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <input
-                      type="number"
-                      step="1"
-                      className="form-input"
-                      style={{ fontSize: '1.15rem', fontWeight: 600, padding: '8px 12px' }}
-                      value={newRateInput}
-                      onChange={(e) => setNewRateInput(e.target.value)}
-                      placeholder="Ex: 2850"
-                      autoFocus
-                      required
-                    />
-                    <span style={{ fontWeight: 600, color: '#374151' }}>CDF</span>
-                  </div>
-                </div>
-
-                {/* Boutons rapides usuels à Kinshasa / RDC */}
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {[2800, 2850, 2860, 2870, 2900].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setNewRateInput(preset.toString())}
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '0.75rem',
-                        background: '#F3F4F6',
-                        border: '1px solid #E5E7EB',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        color: '#374151',
-                      }}
-                    >
-                      {preset.toLocaleString('fr-FR')} CDF
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowRateModal(false)}
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={isSubmittingRate}
-                >
-                  <Check size={16} />
-                  {isSubmittingRate ? 'Synchronisation...' : 'Appliquer partout'}
-                </button>
-              </div>
-            </form>
+                {formatNumber(preset)}
+              </Button>
+            ))}
           </div>
         </div>
-      )}
+      </Modal>
     </>
   );
 };

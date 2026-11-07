@@ -2,23 +2,39 @@ import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
 import { formatCurrency, Currency, subtractMoney, sumMoney } from '@smart-pme/shared';
 import {
-  Wallet,
   ArrowDownCircle,
   Plus,
   Lock,
   Unlock,
-  AlertTriangle,
   Building,
   Smartphone,
-  X,
   RefreshCw,
   CheckCircle,
   FileSpreadsheet,
+  Wallet,
+  Calculator,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { isNetworkFailure, offlineSync } from '../services/offlineSync';
 import { exportToCsv } from '../utils/exportCsv';
+import { useShell } from '../lib/shell';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  IconButton,
+  LoadingState,
+  Modal,
+  SectionCard,
+  StatusBadge,
+} from '../components/ui';
+import { formatDate, formatDateTime } from '../lib/format';
+import { PAYMENT_METHOD_LABELS } from '../lib/status';
+import './FinancesPage.css';
+
 
 const EXPENSE_CATEGORIES = [
   'Frais de fonctionnement',
@@ -256,242 +272,226 @@ export const FinancesPage: React.FC = () => {
   ]), String(cashMovementsOut));
   const diff = subtractMoney(countedBalance || '0', String(theoreticalTotal));
 
+  const { refreshIndicators } = useShell();
+  // L'en-tête (« Caisse ouverte / fermée ») suit l'ouverture et la clôture de session.
+  useEffect(() => {
+    refreshIndicators();
+  }, [currentSession?.id, refreshIndicators]);
+  const sessionCurrency = currentSession?.currency || cashCurrency;
+  const diffTone = Math.abs(diff) < 1 ? 'success' : diff < 0 ? 'danger' : 'warning';
+
+  const billetageItems = [
+    { label: '20 000 CDF', val: b20k, set: setB20k, factor: 20000 },
+    { label: '10 000 CDF', val: b10k, set: setB10k, factor: 10000 },
+    { label: '5 000 CDF', val: b5k, set: setB5k, factor: 5000 },
+    { label: '1 000 CDF', val: b1k, set: setB1k, factor: 1000 },
+    { label: '500 CDF', val: b500, set: setB500, factor: 500 },
+    { label: 'Monnaie et pièces (montant)', val: bPieces, set: setBPieces, factor: 1 },
+  ];
+
+  const updateBilletage = (factor: number, value: string) => {
+    const read = (f: number, current: string) => (factor === f ? value : current);
+    const total = (parseInt(read(20000, b20k), 10) || 0) * 20000
+      + (parseInt(read(10000, b10k), 10) || 0) * 10000
+      + (parseInt(read(5000, b5k), 10) || 0) * 5000
+      + (parseInt(read(1000, b1k), 10) || 0) * 1000
+      + (parseInt(read(500, b500), 10) || 0) * 500
+      + (parseFloat(read(1, bPieces)) || 0);
+    setCountedBalance(String(total));
+  };
+
+  const openExpenseModal = () => {
+    setExpError(null);
+    setExpAmount('');
+    setExpBeneficiary('');
+    setExpRef('');
+    setExpNotes('');
+    setShowExpenseModal(true);
+  };
+
+  const exportExpenses = () => {
+    if (!expenses.length) {
+      toastError('Aucune dépense à exporter.');
+      return;
+    }
+    const rows = expenses.map((exp) => ({
+      'Date': new Date(exp.createdAt).toLocaleDateString('fr-FR'),
+      'Catégorie': exp.category,
+      'Bénéficiaire': exp.beneficiary,
+      'Mode Paiement': PAYMENT_METHOD_LABELS[exp.method] || exp.method,
+      'Référence': exp.reference || '—',
+      'Montant': exp.amount,
+      'Devise': exp.currency || 'CDF',
+      'Observations': exp.notes || '—',
+    }));
+    exportToCsv('Depenses_OpenPME', rows);
+    success('Journal des dépenses exporté.');
+  };
+
   if (loading) {
-    return (
-      <div className="loading-state">
-        <div className="spinner" />
-        <span>Chargement...</span>
-      </div>
-    );
+    return <LoadingState label="Chargement des données financières…" />;
   }
 
   if (loadError) {
     return (
-      <div className="alert alert-danger">
-        <AlertTriangle size={15} className="alert-icon" />
-        <div>
-          <div className="alert-title">Erreur de chargement</div>
-          <div className="alert-body">{loadError}</div>
-          <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: '8px' }} onClick={loadFinances}>
-            <RefreshCw size={12} /> Réessayer
-          </button>
-        </div>
+      <div className="card">
+        <ErrorState title="Impossible de charger les finances" message={loadError} onRetry={loadFinances} />
       </div>
     );
   }
 
   return (
-    <div>
-      {/* Ligne supérieure : caisse + comptes */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+    <div className="page">
+      <div className="finances-top">
         {/* Session de caisse */}
-        <div className="card">
-          <div className="card-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{
-                width: '28px', height: '28px',
-                borderRadius: '6px',
-                background: currentSession ? '#F0FDF4' : '#FFFBEB',
-                border: `1px solid ${currentSession ? '#BBF7D0' : '#FDE68A'}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                flexShrink: 0,
-              }}>
-                {currentSession
-                  ? <Unlock size={15} color="#16A34A" />
-                  : <Lock size={15} color="#D97706" />}
-              </div>
-              <span className="card-title">
-                {currentSession ? `Session ${cashCurrency} ouverte` : `Caisse ${cashCurrency} fermée`}
-              </span>
-            </div>
-            <select
-              aria-label="Devise de la caisse"
-              className="input-field"
-              style={{ maxWidth: '110px' }}
-              value={cashCurrency}
-              onChange={(event) => {
-                setCashCurrency(event.target.value === Currency.USD ? Currency.USD : Currency.CDF);
-                setUseBilletage(false);
-              }}
-            >
-              <option value={Currency.CDF}>CDF</option>
-              <option value={Currency.USD}>USD</option>
-            </select>
-            {currentSession ? (
-              <button
-                type="button"
-                className="btn btn-sm btn-danger-outline"
-                onClick={() => {
-                  setCountedBalance(String(theoreticalTotal));
-                  setCloseError(null);
-                  setShowCloseModal(true);
-                }}
-              >
-                <Lock size={13} /> Clôturer
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                onClick={() => { setOpenError(null); setShowOpenModal(true); }}
-                disabled={cashRegisters.length === 0}
-              >
-                <Unlock size={13} /> Ouvrir
-              </button>
-            )}
-          </div>
-          <div className="card-body">
-            {currentSession ? (
-              <>
-                <div style={{ fontSize: '0.75rem', color: '#6B7280', marginBottom: '10px' }}>
-                  Ouverte le {new Date(currentSession.openedAt).toLocaleString('fr-FR')}&ensp;·&ensp;
-                  {currentSession.user?.firstName} {currentSession.user?.lastName}
-                </div>
-                <div className="totals-box">
-                  <div className="stat-line">
-                    <span className="stat-line-label">Fond d'ouverture</span>
-                    <span className="stat-line-value">{formatCurrency(Number(currentSession.openingBalance), currentSession.currency || Currency.CDF)}</span>
-                  </div>
-                  <div className="stat-line">
-                    <span className="stat-line-label">Espèces encaissées</span>
-                    <span className="stat-line-value" style={{ color: '#16A34A' }}>
-                      +{formatCurrency(totalSessionCash, currentSession.currency || Currency.CDF)}
-                    </span>
-                  </div>
-                  {(cashMovementsIn > 0 || cashMovementsOut > 0) && (
-                    <div className="stat-line">
-                      <span className="stat-line-label">Mouvements de caisse</span>
-                      <span className="stat-line-value">
-                        {formatCurrency(subtractMoney(cashMovementsIn, cashMovementsOut), currentSession.currency)}
-                      </span>
-                    </div>
-                  )}
-                  <div className="stat-line">
-                    <span className="stat-line-label">Total théorique</span>
-                    <span className="stat-line-value font-bold">{formatCurrency(theoreticalTotal, currentSession.currency || Currency.CDF)}</span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="table-empty" style={{ minHeight: '80px' }}>
-                <div className="table-empty-sub">Aucune caisse ouverte. Ouvrez une session pour enregistrer les encaissements.</div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Comptes financiers */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Comptes financiers</span>
-            <button type="button" className="btn btn-sm btn-secondary" onClick={loadFinances}>
-              <RefreshCw size={12} />
-            </button>
-          </div>
-          <div className="card-body" style={{ padding: '0' }}>
-            {accounts.length === 0 ? (
-              <div className="table-empty" style={{ minHeight: '80px' }}>
-                <div className="table-empty-sub">Aucun compte enregistré.</div>
-              </div>
-            ) : (
-              <div>
-                {accounts.map((acc: any) => (
-                  <div key={acc.id} style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '12px 20px',
-                    borderBottom: '1px solid #F1F5F9',
-                  }}>
-                    <div style={{
-                      width: '32px', height: '32px',
-                      borderRadius: '8px',
-                      background: acc.type === 'BANK' ? '#EFF6FF' : '#F0FDF4',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      flexShrink: 0,
-                    }}>
-                      {acc.type === 'BANK'
-                        ? <Building size={15} color="#2563EB" />
-                        : <Smartphone size={15} color="#16A34A" />}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#111827' }}>{acc.name}</div>
-                      <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>{acc.type === 'BANK' ? 'Compte bancaire' : 'Mobile Money'}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: Number(acc.balance) >= 0 ? '#111827' : '#DC2626', fontFamily: "'JetBrains Mono', monospace" }}>
-                        {formatCurrency(Number(acc.balance), acc.currency || Currency.CDF)}
-                      </div>
-                    </div>
-                  </div>
+        <SectionCard
+          title={currentSession ? `Caisse ${cashCurrency} ouverte` : `Caisse ${cashCurrency} fermée`}
+          description={currentSession
+            ? `Depuis le ${formatDateTime(currentSession.openedAt)} · ${[currentSession.user?.firstName, currentSession.user?.lastName].filter(Boolean).join(' ')}`
+            : 'Ouvrez une session pour enregistrer les encaissements en espèces.'}
+          icon={currentSession ? Unlock : Lock}
+          iconTone={currentSession ? 'success' : 'warning'}
+          actions={(
+            <>
+              <div className="segmented" role="group" aria-label="Devise de la caisse">
+                {[Currency.CDF, Currency.USD].map((currency) => (
+                  <button
+                    key={currency}
+                    type="button"
+                    className={`segmented-btn${cashCurrency === currency ? ' active' : ''}`}
+                    aria-pressed={cashCurrency === currency}
+                    onClick={() => {
+                      setCashCurrency(currency);
+                      setUseBilletage(false);
+                    }}
+                  >
+                    {currency}
+                  </button>
                 ))}
               </div>
-            )}
-          </div>
-        </div>
+              {currentSession ? (
+                <Button
+                  size="sm"
+                  variant="danger-outline"
+                  icon={<Lock size={13} />}
+                  onClick={() => {
+                    // Clôture à l'aveugle : le caissier saisit ce qu'il a réellement compté.
+                    setCountedBalance(isManager ? String(theoreticalTotal) : '');
+                    setCloseNotes('');
+                    setCloseError(null);
+                    setShowCloseModal(true);
+                  }}
+                >
+                  Clôturer
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={<Unlock size={13} />}
+                  onClick={() => { setOpenError(null); setShowOpenModal(true); }}
+                  disabled={cashRegisters.length === 0}
+                  title={cashRegisters.length === 0 ? 'Aucune caisse configurée' : undefined}
+                >
+                  Ouvrir
+                </Button>
+              )}
+            </>
+          )}
+        >
+          {currentSession ? (
+            isManager ? (
+              <dl className="finances-lines">
+                <div>
+                  <dt>Fond d’ouverture</dt>
+                  <dd>{formatCurrency(Number(currentSession.openingBalance), sessionCurrency)}</dd>
+                </div>
+                <div>
+                  <dt>Espèces encaissées</dt>
+                  <dd className="text-success">+{formatCurrency(totalSessionCash, sessionCurrency)}</dd>
+                </div>
+                {(cashMovementsIn > 0 || cashMovementsOut > 0) && (
+                  <div>
+                    <dt>Mouvements de caisse</dt>
+                    <dd>{formatCurrency(subtractMoney(cashMovementsIn, cashMovementsOut), sessionCurrency)}</dd>
+                  </div>
+                )}
+                <div className="is-total">
+                  <dt>Total théorique</dt>
+                  <dd>{formatCurrency(theoreticalTotal, sessionCurrency)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="finances-note">
+                Session en cours. Le total attendu n’est visible que par le gérant : à la clôture, comptez les espèces du tiroir et saisissez le montant réel.
+              </p>
+            )
+          ) : (
+            <EmptyState
+              compact
+              icon={Wallet}
+              title="Aucune caisse ouverte"
+              description={cashRegisters.length === 0
+                ? 'Aucune caisse n’est configurée pour votre entreprise.'
+                : 'Les ventes en espèces nécessitent une session ouverte.'}
+            />
+          )}
+        </SectionCard>
+
+        {/* Comptes financiers */}
+        <SectionCard
+          title="Comptes financiers"
+          description="Banques et portefeuilles Mobile Money"
+          icon={Building}
+          flush
+          actions={<IconButton icon={<RefreshCw />} size="sm" variant="secondary" aria-label="Actualiser" onClick={loadFinances} />}
+        >
+          {accounts.length === 0 ? (
+            <EmptyState compact icon={Building} title="Aucun compte enregistré" description="Les comptes bancaires et Mobile Money apparaîtront ici." />
+          ) : (
+            <ul className="finances-accounts">
+              {accounts.map((acc: any) => (
+                <li key={acc.id} className="finances-account">
+                  <span className={`icon-tile icon-tile-sm icon-tile-${acc.type === 'BANK' ? 'primary' : 'success'}`} aria-hidden="true">
+                    {acc.type === 'BANK' ? <Building size={15} /> : <Smartphone size={15} />}
+                  </span>
+                  <div className="flex-1">
+                    <div className="cell-primary">{acc.name}</div>
+                    <div className="cell-secondary">{acc.type === 'BANK' ? 'Compte bancaire' : 'Mobile Money'}</div>
+                  </div>
+                  <div className={`finances-account-balance${Number(acc.balance) < 0 ? ' text-danger' : ''}`}>
+                    {formatCurrency(Number(acc.balance), acc.currency || Currency.CDF)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
       </div>
 
       {/* Journal des dépenses */}
-      <div className="table-wrapper">
-        <div className="table-toolbar">
-          <span className="table-toolbar-title">Journal des dépenses</span>
-          <div className="table-toolbar-actions">
-            <button
-              type="button"
-              className="btn btn-sm btn-secondary"
-              onClick={() => {
-                if (!expenses.length) {
-                  toastError('Aucune dépense à exporter.');
-                  return;
-                }
-                const rows = expenses.map((exp) => ({
-                  'Date': new Date(exp.createdAt).toLocaleDateString('fr-FR'),
-                  'Catégorie': exp.category,
-                  'Bénéficiaire': exp.beneficiary,
-                  'Mode Paiement': exp.method,
-                  'Référence': exp.reference || '—',
-                  'Montant': exp.amount,
-                  'Devise': exp.currency || 'CDF',
-                  'Observations': exp.notes || '—',
-                }));
-                exportToCsv('Depenses_OpenPME', rows);
-                success('Journal des dépenses exporté avec succès !');
-              }}
-              title="Exporter les dépenses vers Excel/CSV"
-            >
-              <FileSpreadsheet size={13} /> Exporter Excel
-            </button>
-            <button type="button" className="btn btn-sm btn-secondary" onClick={loadFinances}>
-              <RefreshCw size={13} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                setExpError(null);
-                setExpAmount('');
-                setExpBeneficiary('');
-                setExpRef('');
-                setExpNotes('');
-                setShowExpenseModal(true);
-              }}
-            >
-              <Plus size={14} />
-              Nouvelle dépense
-            </button>
-          </div>
-        </div>
-        <div className="table-container">
-          {expenses.length === 0 ? (
-            <div className="table-empty">
-              <ArrowDownCircle className="table-empty-icon" />
-              <div className="table-empty-title">Aucune dépense enregistrée</div>
-              <div className="table-empty-sub">Les dépenses enregistrées apparaîtront ici.</div>
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => { setExpError(null); setShowExpenseModal(true); }}>
-                <Plus size={13} /> Enregistrer une dépense
-              </button>
-            </div>
-          ) : (
+      <SectionCard
+        title="Journal des dépenses"
+        icon={ArrowDownCircle}
+        iconTone="danger"
+        flush
+        actions={(
+          <>
+            <Button size="sm" icon={<FileSpreadsheet size={13} />} onClick={exportExpenses}>Exporter vers Excel</Button>
+            <IconButton icon={<RefreshCw />} size="sm" variant="secondary" aria-label="Actualiser" onClick={loadFinances} />
+            <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={openExpenseModal}>Nouvelle dépense</Button>
+          </>
+        )}
+      >
+        {expenses.length === 0 ? (
+          <EmptyState
+            icon={ArrowDownCircle}
+            title="Aucune dépense enregistrée"
+            description="Enregistrez vos dépenses pour suivre la trésorerie et la marge nette."
+            action={<Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={openExpenseModal}>Enregistrer une dépense</Button>}
+          />
+        ) : (
+          <div className="table-container">
             <table className="data-table">
               <thead>
                 <tr>
@@ -507,366 +507,257 @@ export const FinancesPage: React.FC = () => {
               <tbody>
                 {expenses.map((exp: any) => (
                   <tr key={exp.id}>
-                    <td style={{ fontSize: '0.8125rem' }}>{new Date(exp.createdAt).toLocaleDateString('fr-FR')}</td>
-                    <td>
-                      <span className="badge badge-neutral">{exp.category}</span>
-                    </td>
-                    <td style={{ fontWeight: 500 }}>{exp.beneficiary}</td>
-                    <td style={{ fontSize: '0.75rem', color: '#6B7280' }}>{exp.method}</td>
+                    <td className="nowrap">{formatDate(exp.createdAt)}</td>
+                    <td><StatusBadge tone="neutral">{exp.category}</StatusBadge></td>
+                    <td className="cell-primary">{exp.beneficiary}</td>
+                    <td className="nowrap">{PAYMENT_METHOD_LABELS[exp.method] || exp.method}</td>
                     <td className="col-mono">{exp.reference || <span className="text-tertiary">—</span>}</td>
-                    <td className="col-amount text-danger font-semibold">
-                      − {formatCurrency(Number(exp.amount), exp.currency || 'CDF')}
-                    </td>
-                    <td style={{ fontSize: '0.75rem', color: '#6B7280', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {exp.notes || <span className="text-tertiary">—</span>}
+                    <td className="col-amount text-danger">− {formatCurrency(Number(exp.amount), exp.currency || 'CDF')}</td>
+                    <td>
+                      {exp.notes
+                        ? <span className="truncate finances-note-cell" title={exp.notes}>{exp.notes}</span>
+                        : <span className="text-tertiary">—</span>}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* Nouvelle dépense */}
+      <Modal
+        open={showExpenseModal}
+        onClose={() => setShowExpenseModal(false)}
+        title="Nouvelle dépense"
+        description="Les dépenses en espèces sont imputées sur la session de caisse ouverte de la même devise."
+        icon={ArrowDownCircle}
+        tone="danger"
+        busy={submittingExpense}
+        onSubmit={handleCreateExpense}
+        footer={(
+          <>
+            <Button onClick={() => setShowExpenseModal(false)} disabled={submittingExpense}>Annuler</Button>
+            <Button type="submit" variant="primary" loading={submittingExpense} loadingText="Enregistrement…">Enregistrer la dépense</Button>
+          </>
+        )}
+      >
+        {expError && <Alert tone="danger">{expError}</Alert>}
+
+        <Field label="Catégorie" required htmlFor="exp-cat">
+          <select id="exp-cat" className="select-field" value={expCategory} onChange={(e) => setExpCategory(e.target.value)}>
+            {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+
+        <div className="form-grid-3">
+          <Field label="Devise" htmlFor="exp-currency">
+            <select id="exp-currency" className="select-field" value={expenseCurrency}
+              onChange={(e) => {
+                const currency = e.target.value === Currency.USD ? Currency.USD : Currency.CDF;
+                setExpenseCurrency(currency);
+                setExpAccountId(accounts.find((account: any) => account.currency === currency)?.id || '');
+              }}>
+              <option value={Currency.CDF}>CDF</option>
+              <option value={Currency.USD}>USD</option>
+            </select>
+          </Field>
+          <Field label="Montant" required htmlFor="exp-amount">
+            <input id="exp-amount" type="number" min="0.01" step={expenseCurrency === Currency.CDF ? '1' : '0.01'} required className="input-field"
+              placeholder="0" value={expAmount} onChange={(e) => setExpAmount(e.target.value)} />
+          </Field>
+          <Field label="Mode de paiement" htmlFor="exp-method">
+            <select id="exp-method" className="select-field" value={expMethod} onChange={(e) => setExpMethod(e.target.value)}>
+              <option value="CASH">Espèces</option>
+              <option value="BANK_TRANSFER">Virement bancaire</option>
+              <option value="MOBILE_MONEY_MPESA">M-Pesa</option>
+              <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
+              <option value="CHECK">Chèque</option>
+            </select>
+          </Field>
+        </div>
+
+        {expMethod === 'CASH' && !cashSessions[expenseCurrency]?.id && (
+          <Alert tone="warning">Aucune session de caisse {expenseCurrency} n’est ouverte : ouvrez-la avant d’enregistrer une dépense en espèces.</Alert>
+        )}
+
+        <Field label="Bénéficiaire" required htmlFor="exp-beneficiary">
+          <input id="exp-beneficiary" type="text" required className="input-field"
+            placeholder="Nom du fournisseur ou du bénéficiaire" value={expBeneficiary}
+            onChange={(e) => setExpBeneficiary(e.target.value)} />
+        </Field>
+
+        <div className="form-grid">
+          <Field label="Référence ou pièce justificative" htmlFor="exp-ref">
+            <input id="exp-ref" type="text" className="input-field"
+              placeholder="N° de reçu, de facture…" value={expRef}
+              onChange={(e) => setExpRef(e.target.value)} />
+          </Field>
+          {expMethod !== 'CASH' && (
+            <Field label="Compte débité" htmlFor="exp-account">
+              <select id="exp-account" className="select-field" value={expAccountId} onChange={(e) => setExpAccountId(e.target.value)}>
+                <option value="">Sélectionner un compte</option>
+                {accounts.filter((account: any) => account.currency === expenseCurrency)
+                  .map((account: any) => <option key={account.id} value={account.id}>{account.name}</option>)}
+              </select>
+            </Field>
           )}
         </div>
-      </div>
 
-      {/* ── Modal Nouvelle Dépense ── */}
-      {showExpenseModal && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <ArrowDownCircle size={16} color="#DC2626" />
-                <span className="modal-title">Enregistrer une dépense</span>
-              </div>
-              <button type="button" className="btn-close" onClick={() => setShowExpenseModal(false)} aria-label="Fermer">
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleCreateExpense}>
-              <div className="modal-body">
-                {expError && (
-                  <div className="alert alert-danger" style={{ marginBottom: '14px' }}>
-                    <AlertTriangle size={14} className="alert-icon" />
-                    <span>{expError}</span>
-                  </div>
-                )}
+        <Field label="Notes internes" htmlFor="exp-notes" className="mb-0">
+          <input id="exp-notes" type="text" className="input-field"
+            placeholder="Commentaire facultatif" value={expNotes}
+            onChange={(e) => setExpNotes(e.target.value)} />
+        </Field>
+      </Modal>
 
-                <div className="form-group">
-                  <label className="form-label" htmlFor="exp-cat">Catégorie <span className="required">*</span></label>
-                  <select id="exp-cat" className="input-field" value={expCategory} onChange={(e) => setExpCategory(e.target.value)}>
-                    {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
+      {/* Ouverture de caisse */}
+      <Modal
+        open={showOpenModal}
+        onClose={() => setShowOpenModal(false)}
+        title={`Ouvrir la caisse ${cashCurrency}`}
+        description="Saisissez le montant réellement compté en espèces au moment de l’ouverture."
+        icon={Unlock}
+        tone="success"
+        busy={submittingOpen}
+        onSubmit={handleOpenSession}
+        footer={(
+          <>
+            <Button onClick={() => setShowOpenModal(false)} disabled={submittingOpen}>Annuler</Button>
+            <Button type="submit" variant="success" icon={<Unlock size={14} />} loading={submittingOpen} loadingText="Ouverture…">Ouvrir la caisse</Button>
+          </>
+        )}
+      >
+        {openError && <Alert tone="danger">{openError}</Alert>}
 
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="exp-currency">Devise</label>
-                    <select id="exp-currency" className="input-field" value={expenseCurrency}
-                      onChange={(e) => {
-                        const currency = e.target.value === Currency.USD ? Currency.USD : Currency.CDF;
-                        setExpenseCurrency(currency);
-                        setExpAccountId(accounts.find((account: any) => account.currency === currency)?.id || '');
-                      }}>
-                      <option value={Currency.CDF}>CDF</option>
-                      <option value={Currency.USD}>USD</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="exp-amount">Montant ({expenseCurrency}) <span className="required">*</span></label>
-                    <input id="exp-amount" type="number" min="0.01" step={expenseCurrency === Currency.CDF ? '1' : '0.01'} required className="input-field"
-                      placeholder="0" value={expAmount} onChange={(e) => setExpAmount(e.target.value)} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="exp-method">Mode de paiement</label>
-                    <select id="exp-method" className="input-field" value={expMethod} onChange={(e) => setExpMethod(e.target.value)}>
-                      <option value="CASH">Espèces</option>
-                      <option value="BANK_TRANSFER">Virement bancaire</option>
-                      <option value="MOBILE_MONEY_MPESA">M-Pesa</option>
-                      <option value="MOBILE_MONEY_AIRTEL">Airtel Money</option>
-                      <option value="CHECK">Chèque</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="exp-beneficiary">Bénéficiaire <span className="required">*</span></label>
-                  <input id="exp-beneficiary" type="text" required className="input-field"
-                    placeholder="Nom du fournisseur ou bénéficiaire" value={expBeneficiary}
-                    onChange={(e) => setExpBeneficiary(e.target.value)} />
-                </div>
-
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="exp-ref">Référence / Pièce justificative</label>
-                    <input id="exp-ref" type="text" className="input-field"
-                      placeholder="N° reçu, facture..." value={expRef}
-                      onChange={(e) => setExpRef(e.target.value)} />
-                  </div>
-                  {expMethod !== 'CASH' && (
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="exp-account">Compte débité</label>
-                      <select id="exp-account" className="input-field" value={expAccountId} onChange={(e) => setExpAccountId(e.target.value)}>
-                        <option value="">— Sélectionner —</option>
-                        {accounts.filter((account: any) => account.currency === expenseCurrency)
-                          .map((account: any) => <option key={account.id} value={account.id}>{account.name}</option>)}
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="exp-notes">Notes internes</label>
-                  <input id="exp-notes" type="text" className="input-field"
-                    placeholder="Commentaire facultatif..." value={expNotes}
-                    onChange={(e) => setExpNotes(e.target.value)} />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowExpenseModal(false)}>Annuler</button>
-                <button type="submit" disabled={submittingExpense} className="btn btn-danger">
-                  {submittingExpense ? (
-                    <><span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />Enregistrement...</>
-                  ) : <><ArrowDownCircle size={14} /> Enregistrer la dépense</>}
-                </button>
-              </div>
-            </form>
+        <Field label="Caisse" required htmlFor="open-register">
+          <select id="open-register" className="select-field" value={selectedRegisterId}
+            onChange={(e) => setSelectedRegisterId(e.target.value)}>
+            {cashRegisters.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Fond de caisse initial" required htmlFor="open-balance">
+          <div className="input-addon">
+            <input id="open-balance" type="number" min="0" step={cashCurrency === Currency.CDF ? '1' : '0.01'} required className="input-field"
+              placeholder="Montant compté" value={openBalance}
+              onChange={(e) => setOpenBalance(e.target.value)} />
+            <span className="input-addon-text">{cashCurrency}</span>
           </div>
-        </div>
-      )}
+        </Field>
+        <Field label="Notes d’ouverture" htmlFor="open-notes" className="mb-0">
+          <input id="open-notes" type="text" className="input-field"
+            placeholder="Observation facultative" value={openNotes}
+            onChange={(e) => setOpenNotes(e.target.value)} />
+        </Field>
+      </Modal>
 
-      {/* ── Modal Ouverture Caisse ── */}
-      {showOpenModal && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Unlock size={16} color="#16A34A" />
-                <span className="modal-title">Ouverture de caisse</span>
-              </div>
-              <button type="button" className="btn-close" onClick={() => setShowOpenModal(false)} aria-label="Fermer">
-                <X size={18} />
-              </button>
+      {/* Clôture de caisse */}
+      <Modal
+        open={Boolean(showCloseModal && currentSession)}
+        onClose={() => setShowCloseModal(false)}
+        title={`Clôturer la caisse ${sessionCurrency}`}
+        description={isManager
+          ? 'Vérifiez le montant compté : l’écart avec le total théorique est enregistré.'
+          : 'Clôture à l’aveugle : comptez physiquement les espèces du tiroir et saisissez le montant total.'}
+        icon={Lock}
+        tone="danger"
+        busy={submittingClose}
+        onSubmit={handleCloseSession}
+        footer={(
+          <>
+            <Button onClick={() => setShowCloseModal(false)} disabled={submittingClose}>Annuler</Button>
+            <Button type="submit" variant="danger" icon={<Lock size={14} />} loading={submittingClose} loadingText="Clôture en cours…">Valider la clôture</Button>
+          </>
+        )}
+      >
+        {closeError && <Alert tone="danger">{closeError}</Alert>}
+
+        {isManager && currentSession && (
+          <dl className="finances-lines finances-lines-boxed">
+            <div>
+              <dt>Fond d’ouverture</dt>
+              <dd>{formatCurrency(Number(currentSession.openingBalance), sessionCurrency)}</dd>
             </div>
-            <form onSubmit={handleOpenSession}>
-              <div className="modal-body">
-                {openError && (
-                  <div className="alert alert-danger" style={{ marginBottom: '14px' }}>
-                    <AlertTriangle size={14} className="alert-icon" />
-                    <span>{openError}</span>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="open-register">Caisse <span className="required">*</span></label>
-                  <select id="open-register" className="input-field" value={selectedRegisterId}
-                    onChange={(e) => setSelectedRegisterId(e.target.value)}>
-                    {cashRegisters.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="open-balance">
-                    Fond de caisse initial ({cashCurrency}) <span className="required">*</span>
-                  </label>
-                  <input id="open-balance" type="number" min="0" step={cashCurrency === Currency.CDF ? '1' : '0.01'} required className="input-field"
-                    placeholder="Montant compté en espèces" value={openBalance}
-                    onChange={(e) => setOpenBalance(e.target.value)} />
-                  <div className="form-hint">Saisissez le montant réel compté en espèces au moment de l'ouverture.</div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="open-notes">Notes d'ouverture</label>
-                  <input id="open-notes" type="text" className="input-field"
-                    placeholder="Observation facultative..." value={openNotes}
-                    onChange={(e) => setOpenNotes(e.target.value)} />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowOpenModal(false)}>Annuler</button>
-                <button type="submit" disabled={submittingOpen} className="btn btn-success">
-                  {submittingOpen ? (
-                    <><span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />Ouverture...</>
-                  ) : <><Unlock size={14} /> Ouvrir la caisse</>}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal Clôture Caisse ── */}
-      {showCloseModal && currentSession && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Lock size={16} color="#DC2626" />
-                <span className="modal-title">Clôture de caisse</span>
-              </div>
-              <button type="button" className="btn-close" onClick={() => setShowCloseModal(false)} aria-label="Fermer">
-                <X size={18} />
-              </button>
+            <div>
+              <dt>Encaissements en espèces</dt>
+              <dd className="text-success">+{formatCurrency(totalSessionCash, sessionCurrency)}</dd>
             </div>
-            <form onSubmit={handleCloseSession}>
-              <div className="modal-body">
-                {closeError && (
-                  <div className="alert alert-danger" style={{ marginBottom: '14px' }}>
-                    <AlertTriangle size={14} className="alert-icon" />
-                    <span>{closeError}</span>
-                  </div>
-                )}
+            <div className="is-total">
+              <dt>Total théorique attendu</dt>
+              <dd>{formatCurrency(theoreticalTotal, sessionCurrency)}</dd>
+            </div>
+          </dl>
+        )}
 
-                {/* Résumé session (Clôture à l'aveugle pour le caissier) */}
-                {isManager ? (
-                  <div className="totals-box" style={{ marginBottom: '16px' }}>
-                    <div className="stat-line">
-                      <span className="stat-line-label">Fond d'ouverture</span>
-                      <span className="stat-line-value">{formatCurrency(Number(currentSession.openingBalance), currentSession.currency)}</span>
-                    </div>
-                    <div className="stat-line">
-                      <span className="stat-line-label">Encaissements espèces</span>
-                      <span className="stat-line-value text-success">+{formatCurrency(totalSessionCash, currentSession.currency)}</span>
-                    </div>
-                    <div className="stat-line" style={{ borderTop: '1px solid #E2E8F0', paddingTop: '8px', marginTop: '4px' }}>
-                      <span className="stat-line-label font-semibold">Total théorique attendu</span>
-                      <span className="stat-line-value font-bold">{formatCurrency(theoreticalTotal, currentSession.currency)}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{
-                    background: '#F1F5F9',
-                    border: '1px solid #CBD5E1',
-                    borderRadius: '6px',
-                    padding: '10px 12px',
-                    fontSize: '0.8125rem',
-                    color: '#475569',
-                    marginBottom: '16px',
-                  }}>
-                    <strong>Procédure de clôture à l'aveugle :</strong> Comptez physiquement les espèces présentes dans le tiroir-caisse et saisissez le montant total.
-                  </div>
-                )}
-
-                {/* Option Billetage */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <label className="form-label" style={{ margin: 0 }}>
-                    Solde réel compté ({currentSession.currency}) <span className="required">*</span>
-                  </label>
-                  {cashCurrency === Currency.CDF && (
-                    <button
-                      type="button"
-                      onClick={() => setUseBilletage(!useBilletage)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#2563EB',
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {useBilletage ? 'Saisie directe simple' : 'Aide au comptage (Billetage CDF)'}
-                    </button>
-                  )}
-                </div>
-
-                {cashCurrency === Currency.CDF && useBilletage ? (
-                  <div style={{
-                    background: '#F8FAFC',
-                    border: '1px solid #E2E8F0',
-                    borderRadius: '6px',
-                    padding: '10px',
-                    marginBottom: '14px',
-                  }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: '8px' }}>
-                      Comptage des coupures en Francs Congolais (CDF) :
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                      {[
-                        { label: '20 000 CDF', val: b20k, set: setB20k, factor: 20000 },
-                        { label: '10 000 CDF', val: b10k, set: setB10k, factor: 10000 },
-                        { label: '5 000 CDF', val: b5k, set: setB5k, factor: 5000 },
-                        { label: '1 000 CDF', val: b1k, set: setB1k, factor: 1000 },
-                        { label: '500 CDF', val: b500, set: setB500, factor: 500 },
-                        { label: 'Monnaie / Pièces', val: bPieces, set: setBPieces, factor: 1 },
-                      ].map((item) => (
-                        <div key={item.label}>
-                          <label style={{ fontSize: '0.65rem', color: '#64748B', display: 'block' }}>{item.label}</label>
-                          <input
-                            type="number"
-                            min="0"
-                            placeholder="0"
-                            className="input-field"
-                            style={{ padding: '4px 6px', fontSize: '0.8rem' }}
-                            value={item.val}
-                            onChange={(e) => {
-                              item.set(e.target.value);
-                              // Recalcul immédiat
-                              const v20 = item.factor === 20000 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b20k, 10) || 0);
-                              const v10 = item.factor === 10000 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b10k, 10) || 0);
-                              const v5 = item.factor === 5000 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b5k, 10) || 0);
-                              const v1 = item.factor === 1000 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b1k, 10) || 0);
-                              const v500 = item.factor === 500 ? (parseInt(e.target.value, 10) || 0) : (parseInt(b500, 10) || 0);
-                              const vp = item.factor === 1 ? (parseFloat(e.target.value) || 0) : (parseFloat(bPieces) || 0);
-                              const total = v20 * 20000 + v10 * 10000 + v5 * 5000 + v1 * 1000 + v500 * 500 + vp;
-                              setCountedBalance(String(total));
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: '8px', textAlign: 'right', fontSize: '0.8rem', fontWeight: 700, color: '#0F172A' }}>
-                      Total compté : {((parseFloat(countedBalance) || 0)).toLocaleString('fr-FR')} {currentSession.currency}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="form-group">
-                    <input id="close-balance" type="number" min="0" step={currentSession.currency === Currency.CDF ? '1' : '0.01'} required className="input-field"
-                      placeholder={`Solde compté en ${currentSession.currency}`}
-                      value={countedBalance} onChange={(e) => setCountedBalance(e.target.value)} />
-                  </div>
-                )}
-
-                {/* Écart calculé en temps réel */}
-                {countedBalance !== '' && (
-                  <div style={{
-                    background: Math.abs(diff) < 1 ? '#F0FDF4' : diff < 0 ? '#FEF2F2' : '#FFFBEB',
-                    border: `1px solid ${Math.abs(diff) < 1 ? '#BBF7D0' : diff < 0 ? '#FECACA' : '#FDE68A'}`,
-                    borderRadius: '6px',
-                    padding: '10px 14px',
-                    marginBottom: '14px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: '0.875rem',
-                  }}>
-                    <span style={{ color: '#4B5563' }}>Écart de caisse :</span>
-                    <strong style={{ color: Math.abs(diff) < 1 ? '#16A34A' : diff < 0 ? '#DC2626' : '#D97706' }}>
-                      {diff >= 0 ? '+' : ''}{formatCurrency(diff, currentSession.currency)}
-                      {Math.abs(diff) < 1 && ' — Caisse équilibrée'}
-                      {diff < -1 && ' — Manquant'}
-                      {diff > 1 && ' — Excédent'}
-                    </strong>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="close-notes">
-                    Observations de clôture {diff < -1 && <span className="required">* (Obligatoire si manquant)</span>}
-                  </label>
-                  <input id="close-notes" type="text" className="input-field"
-                    required={diff < -1}
-                    placeholder="Raison d'un éventuel écart ou observation..." value={closeNotes}
-                    onChange={(e) => setCloseNotes(e.target.value)} />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowCloseModal(false)}>Annuler</button>
-                <button type="submit" disabled={submittingClose} className="btn btn-danger">
-                  {submittingClose ? (
-                    <><span className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />Clôture en cours...</>
-                  ) : <><Lock size={14} /> Valider la clôture</>}
-                </button>
-              </div>
-            </form>
-          </div>
+        <div className="finances-count-head">
+          <label className="form-label mb-0" htmlFor="close-balance">
+            Montant réel compté ({sessionCurrency}) <span className="required">*</span>
+          </label>
+          {cashCurrency === Currency.CDF && (
+            <Button size="xs" variant="ghost" icon={<Calculator size={13} />} onClick={() => setUseBilletage(!useBilletage)}>
+              {useBilletage ? 'Saisie directe' : 'Compter par coupures'}
+            </Button>
+          )}
         </div>
-      )}
+
+        {cashCurrency === Currency.CDF && useBilletage ? (
+          <div className="finances-billetage">
+            <div className="finances-billetage-grid">
+              {billetageItems.map((item) => (
+                <Field key={item.label} label={item.label} htmlFor={`bill-${item.factor}`} className="mb-0">
+                  <input
+                    id={`bill-${item.factor}`}
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    className="input-field input-sm"
+                    value={item.val}
+                    onChange={(e) => {
+                      item.set(e.target.value);
+                      updateBilletage(item.factor, e.target.value);
+                    }}
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className="finances-billetage-total">
+              Total compté : <strong>{formatCurrency(parseFloat(countedBalance) || 0, sessionCurrency)}</strong>
+            </div>
+          </div>
+        ) : (
+          <div className="form-group">
+            <input id="close-balance" type="number" min="0" step={sessionCurrency === Currency.CDF ? '1' : '0.01'} required className="input-field"
+              placeholder={`Montant compté en ${sessionCurrency}`}
+              value={countedBalance} onChange={(e) => setCountedBalance(e.target.value)} />
+          </div>
+        )}
+
+        {isManager && countedBalance !== '' && (
+          <div className={`finances-diff finances-diff-${diffTone}`}>
+            <span>Écart de caisse</span>
+            <strong>
+              {diff >= 0 ? '+' : ''}{formatCurrency(diff, sessionCurrency)}
+              {Math.abs(diff) < 1 && ' · caisse équilibrée'}
+              {diff < -1 && ' · manquant'}
+              {diff > 1 && ' · excédent'}
+            </strong>
+          </div>
+        )}
+
+        <Field
+          label="Observations de clôture"
+          required={isManager && diff < -1}
+          hint={isManager && diff < -1 ? 'Obligatoire en cas de manquant.' : 'Raison d’un éventuel écart ou remarque.'}
+          htmlFor="close-notes"
+          className="mb-0"
+        >
+          <input id="close-notes" type="text" className="input-field"
+            required={isManager && diff < -1}
+            value={closeNotes}
+            onChange={(e) => setCloseNotes(e.target.value)} />
+        </Field>
+      </Modal>
     </div>
   );
 };

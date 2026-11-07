@@ -1,0 +1,113 @@
+/* Alertes & contrôles */
+.anomalies-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.anomaly-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 16px 20px;
+  border-left: 3px solid var(--border-strong);
+}
+
+.anomaly-card-danger  { border-left-color: var(--danger); }
+.anomaly-card-warning { border-left-color: var(--warning); }
+.anomaly-card-success { border-left-color: var(--success); }
+.anomaly-card-neutral { border-left-color: var(--border-strong); }
+
+.anomaly-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.anomaly-title-block {
+  flex: 1;
+  min-width: 0;
+}
+
+.anomaly-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.anomaly-meta {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.anomaly-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.anomaly-text {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.anomaly-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+  padding: 10px 14px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.anomaly-facts dt {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.anomaly-facts dd {
+  margin-top: 2px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.anomaly-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.anomaly-recap {
+  margin-bottom: var(--space-4);
+  padding: 12px 14px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.anomaly-recap-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.anomaly-recap-text {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 720px) {
+  .anomaly-head {
+    flex-wrap: wrap;
+  }
+}
