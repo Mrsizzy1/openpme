@@ -35,6 +35,7 @@ import {
 } from '../components/ui';
 import { formatDate, formatNumber } from '../lib/format';
 import { ANOMALY_SEVERITY, SALE_STATUS, getStatusMeta } from '../lib/status';
+import { useRealtime } from '../lib/realtime';
 import './DashboardPage.css';
 
 export const DashboardPage: React.FC = () => {
@@ -94,6 +95,11 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     loadMetrics();
   }, []);
+
+  // Indicateurs actualisés dès qu'un autre poste enregistre une opération.
+  useRealtime(['sales', 'payments', 'invoices', 'finances', 'products', 'anomalies', 'suppliers'], () => {
+    if (hasData.current) void loadMetrics();
+  });
 
   const changeCurrency = (currency: Currency) => {
     if (currency === displayCurrency) return;

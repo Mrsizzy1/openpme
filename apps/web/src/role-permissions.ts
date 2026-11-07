@@ -1,16 +1,52 @@
+/**
+ * Matrice des droits côté interface. Elle reflète celle de l'API
+ * (apps/api/src/common/security/role-groups.ts), qui reste la seule garantie de sécurité :
+ * l'interface masque simplement ce que le rôle ne peut pas faire.
+ * L'administrateur (SUPER_ADMIN, ORG_OWNER) et le gérant (MANAGER) voient et font tout.
+ */
+const ADMINS = ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER'] as const;
+
 export const ROLE_ACCESS_BY_PATH: Record<string, readonly string[]> = {
-  '/': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'AUDITOR'],
-  '/sales': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'CASHIER', 'SALES_REP'],
-  '/products': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'INVENTORY_MANAGER', 'ACCOUNTANT'],
-  '/invoices': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER'],
-  '/finances': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER'],
-  '/customers': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER', 'SALES_REP'],
-  '/suppliers': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'ACCOUNTANT', 'INVENTORY_MANAGER', 'PURCHASER'],
-  '/anomalies': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER', 'AUDITOR'],
-  '/users': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER'],
-  '/terminals': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER'],
-  '/settings': ['SUPER_ADMIN', 'ORG_OWNER', 'MANAGER'],
+  '/': [...ADMINS, 'ACCOUNTANT', 'AUDITOR'],
+  '/sales': [...ADMINS, 'CASHIER', 'SALES_REP', 'AUDITOR'],
+  '/products': [...ADMINS, 'INVENTORY_MANAGER', 'ACCOUNTANT', 'AUDITOR'],
+  '/invoices': [...ADMINS, 'ACCOUNTANT', 'CASHIER', 'AUDITOR'],
+  '/finances': [...ADMINS, 'ACCOUNTANT', 'CASHIER', 'AUDITOR'],
+  '/customers': [...ADMINS, 'ACCOUNTANT', 'CASHIER', 'SALES_REP', 'AUDITOR'],
+  '/suppliers': [...ADMINS, 'ACCOUNTANT', 'INVENTORY_MANAGER', 'PURCHASER', 'AUDITOR'],
+  '/anomalies': [...ADMINS, 'AUDITOR'],
+  '/users': [...ADMINS, 'AUDITOR'],
+  '/terminals': [...ADMINS],
+  '/settings': [...ADMINS],
 };
+
+/** Actions autorisées par rôle (même découpage que l'API). */
+const CAPABILITIES = {
+  sell: [...ADMINS, 'CASHIER', 'SALES_REP'],
+  manageProducts: [...ADMINS, 'INVENTORY_MANAGER'],
+  createCustomer: [...ADMINS, 'ACCOUNTANT', 'CASHIER', 'SALES_REP'],
+  editCustomer: [...ADMINS, 'ACCOUNTANT', 'SALES_REP'],
+  deleteCustomer: [...ADMINS],
+  createSupplier: [...ADMINS, 'ACCOUNTANT', 'PURCHASER'],
+  collectPayment: [...ADMINS, 'ACCOUNTANT', 'CASHIER'],
+  manageInvoices: [...ADMINS, 'ACCOUNTANT'],
+  operateCash: [...ADMINS, 'ACCOUNTANT', 'CASHIER'],
+  viewFinances: [...ADMINS, 'ACCOUNTANT', 'AUDITOR'],
+  manageExpenses: [...ADMINS, 'ACCOUNTANT'],
+  manageUsers: [...ADMINS],
+  manageAnomalies: [...ADMINS],
+} as const satisfies Record<string, readonly string[]>;
+
+export type Capability = keyof typeof CAPABILITIES;
+
+export function can(role: string | undefined, capability: Capability): boolean {
+  return Boolean(role && (CAPABILITIES[capability] as readonly string[]).includes(role));
+}
+
+/** Rôle en lecture seule sur l'ensemble des données. */
+export function isReadOnly(role: string | undefined): boolean {
+  return role === 'AUDITOR';
+}
 
 export function hasPathAccess(path: string, role?: string): boolean {
   const allowedRoles = ROLE_ACCESS_BY_PATH[path];

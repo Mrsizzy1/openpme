@@ -30,6 +30,7 @@ import {
 } from '../components/ui';
 import { formatNumber, formatRelativeTime } from '../lib/format';
 import { getRoleLabel } from '../lib/status';
+import { useRealtime } from '../lib/realtime';
 import './TerminalsPage.css';
 
 interface Terminal {
@@ -111,6 +112,10 @@ export const TerminalsPage: React.FC = () => {
     const interval = setInterval(fetchTerminals, 3000);
     return () => clearInterval(interval);
   }, [autoRefresh]);
+
+  useRealtime(['remote-control'], () => {
+    void fetchTerminals();
+  });
 
   const handleOpenActionModal = (term: Terminal, type: TerminalAction = 'LOCK') => {
     setSelectedTerminal(term);

@@ -21,6 +21,7 @@ import {
 } from '../components/ui';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { ANOMALY_RULE_LABELS, ANOMALY_SEVERITY, ANOMALY_STATUS, getStatusMeta } from '../lib/status';
+import { useRealtime } from '../lib/realtime';
 import './AnomaliesPage.css';
 
 const FILTER_OPTIONS = [
@@ -69,6 +70,10 @@ export const AnomaliesPage: React.FC = () => {
   useEffect(() => {
     loadAnomalies();
   }, [statusFilter]);
+
+  useRealtime(['anomalies', 'sales', 'finances'], () => {
+    if (hasLoadedOnce.current) void loadAnomalies();
+  });
 
   const handleScan = async () => {
     setScanning(true);

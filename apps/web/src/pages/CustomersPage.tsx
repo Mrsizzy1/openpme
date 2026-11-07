@@ -21,12 +21,17 @@ import {
   useConfirm,
 } from '../components/ui';
 import { formatNumber } from '../lib/format';
+import { useRealtime } from '../lib/realtime';
+import { can } from '../role-permissions';
 
 export const CustomersPage: React.FC = () => {
   const { user } = useAuth();
   const { success, error: toastError } = useToast();
   const confirm = useConfirm();
-  const canManage = user?.role === 'ORG_OWNER' || user?.role === 'MANAGER' || user?.role === 'SUPER_ADMIN';
+  const canCreate = can(user?.role, 'createCustomer');
+  const canEdit = can(user?.role, 'editCustomer');
+  const canDelete = can(user?.role, 'deleteCustomer');
+  const canManage = canEdit || canDelete;
 
   const [customers, setCustomers] = useState<any[]>([]);
   const [search, setSearch] = useState('');
@@ -70,6 +75,10 @@ export const CustomersPage: React.FC = () => {
     }, hasLoadedOnce.current ? 300 : 0);
     return () => window.clearTimeout(timer);
   }, [search]);
+
+  useRealtime(['customers', 'sales', 'payments', 'invoices'], () => {
+    if (hasLoadedOnce.current) void loadCustomers();
+  });
 
   const resetForm = () => {
     setFormName('');
@@ -208,7 +217,7 @@ export const CustomersPage: React.FC = () => {
           icon={Users}
           title="Aucun client enregistré"
           description="Créez vos fiches clients pour suivre leurs achats, leurs encours et leur limite de crédit."
-          action={<Button variant="primary" icon={<Plus size={15} />} onClick={openCreate}>Nouveau client</Button>}
+          action={canCreate ? <Button variant="primary" icon={<Plus size={15} />} onClick={openCreate}>Nouveau client</Button> : undefined}
         />
       );
     }
@@ -268,8 +277,8 @@ export const CustomersPage: React.FC = () => {
                   </td>
                   {canManage && (
                     <td className="col-actions">
-                      <IconButton icon={<Pencil />} size="sm" aria-label={`Modifier ${c.name}`} title="Modifier" onClick={() => handleOpenEdit(c)} />
-                      <IconButton icon={<Trash2 />} size="sm" variant="danger" aria-label={`Supprimer ${c.name}`} title="Supprimer" onClick={() => handleDeleteCustomer(c)} />
+                      {canEdit && <IconButton icon={<Pencil />} size="sm" aria-label={`Modifier ${c.name}`} title="Modifier" onClick={() => handleOpenEdit(c)} />}
+                      {canDelete && <IconButton icon={<Trash2 />} size="sm" variant="danger" aria-label={`Supprimer ${c.name}`} title="Supprimer" onClick={() => handleDeleteCustomer(c)} />}
                     </td>
                   )}
                 </tr>
@@ -299,9 +308,11 @@ export const CustomersPage: React.FC = () => {
         end={(
           <>
             <IconButton icon={<RefreshCw />} variant="secondary" aria-label="Actualiser la liste" onClick={loadCustomers} />
-            <Button variant="primary" icon={<Plus size={15} />} onClick={openCreate}>
-              Nouveau client
-            </Button>
+            {canCreate && (
+              <Button variant="primary" icon={<Plus size={15} />} onClick={openCreate}>
+                Nouveau client
+              </Button>
+            )}
           </>
         )}
       />

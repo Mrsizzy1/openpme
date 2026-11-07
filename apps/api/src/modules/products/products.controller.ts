@@ -6,18 +6,12 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
+import { ROLE_GROUPS } from '../../common/security/role-groups';
 import { CreateProductDto, UpdateProductDto } from './products.dto';
 import { CreateStockMovementDto } from './stock-movement.dto';
 
-const PRODUCT_READ_ROLES = [
-  UserRole.SUPER_ADMIN,
-  UserRole.ORG_OWNER,
-  UserRole.MANAGER,
-  UserRole.INVENTORY_MANAGER,
-  UserRole.ACCOUNTANT,
-  UserRole.CASHIER,
-];
-const PRODUCT_MANAGEMENT_ROLES = PRODUCT_READ_ROLES.filter((role) => role !== UserRole.CASHIER);
+const PRODUCT_READ_ROLES = ROLE_GROUPS.productsRead;
+const PRODUCT_MANAGEMENT_ROLES = ROLE_GROUPS.productsWrite;
 
 @ApiTags('Products & Inventory')
 @Controller('products')

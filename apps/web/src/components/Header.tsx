@@ -20,6 +20,8 @@ import { Button } from './ui/Button';
 import { IconButton } from './ui/IconButton';
 import { EmptyState } from './ui/EmptyState';
 import { formatDateTime, formatNumber } from '../lib/format';
+import { can, hasPathAccess } from '../role-permissions';
+import { useRealtimeStatus } from '../lib/realtime';
 
 interface HeaderProps {
   title: string;
@@ -53,6 +55,12 @@ export const Header: React.FC<HeaderProps> = ({
   const [isSubmittingRate, setIsSubmittingRate] = useState(false);
 
   const canManageRate = user?.role === 'ORG_OWNER' || user?.role === 'MANAGER' || user?.role === 'SUPER_ADMIN';
+  const canSell = can(user?.role, 'sell');
+  const canOpenFinances = hasPathAccess('/finances', user?.role);
+  const realtimeStatus = useRealtimeStatus();
+  const realtimeLabel = realtimeStatus === 'live'
+    ? 'Synchronisation en temps réel active avec les autres postes.'
+    : 'Synchronisation en temps réel interrompue : reconnexion automatique en cours.';
 
   useEffect(() => {
     let active = true;
@@ -211,7 +219,7 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <span
               className={`chip chip-${syncTone}`}
-              title={pendingSyncError || offlineStatusLabel}
+              title={pendingSyncError || `${offlineStatusLabel}. ${realtimeLabel}`}
               role="status"
             >
               {syncIcon}
@@ -250,7 +258,8 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Session de caisse */}
           <button
             type="button"
-            onClick={() => navigate('/finances')}
+            onClick={() => canOpenFinances && navigate('/finances')}
+            disabled={!canOpenFinances}
             className={`chip ${activeSession ? 'chip-success' : 'chip-warning'}`}
             title={activeSession ? 'Caisse ouverte — voir la session' : 'Caisse fermée — ouvrir une session'}
           >
@@ -258,6 +267,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="chip-label">{activeSession ? 'Caisse ouverte' : 'Caisse fermée'}</span>
           </button>
 
+          {canSell && (
           <Button
             variant="primary"
             size="sm"
@@ -270,6 +280,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <span className="header-new-sale-label">Nouvelle vente</span>
           </Button>
+          )}
         </div>
       </header>
 

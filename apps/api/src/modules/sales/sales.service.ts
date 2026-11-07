@@ -38,9 +38,10 @@ export function snapshotSaleUnitCost(
 export class SalesService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(organizationId: string, limit = 50) {
+  /** `userId` restreint la liste aux ventes de ce vendeur (caissier, commercial). */
+  async findAll(organizationId: string, limit = 50, userId?: string) {
     return this.prisma.sale.findMany({
-      where: { organizationId },
+      where: { organizationId, ...(userId ? { userId } : {}) },
       include: {
         customer: true,
         user: { select: { id: true, firstName: true, lastName: true } },
@@ -52,9 +53,9 @@ export class SalesService {
     });
   }
 
-  async findById(organizationId: string, id: string) {
+  async findById(organizationId: string, id: string, userId?: string) {
     const sale = await this.prisma.sale.findFirst({
-      where: { id, organizationId },
+      where: { id, organizationId, ...(userId ? { userId } : {}) },
       include: {
         customer: true,
         user: { select: { id: true, firstName: true, lastName: true } },

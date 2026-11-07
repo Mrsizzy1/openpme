@@ -6,6 +6,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
+import { ROLE_GROUPS } from '../../common/security/role-groups';
 
 @ApiTags('Customers')
 @Controller('customers')
@@ -15,7 +16,7 @@ export class CustomersController {
   constructor(private customersService: CustomersService) {}
 
   @Get()
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.CASHIER, UserRole.SALES_REP)
+  @Roles(...ROLE_GROUPS.customersRead)
   @ApiOperation({ summary: 'Lister les clients avec recherche' })
   @ApiQuery({ name: 'search', required: false })
   async findAll(@CurrentUser('organizationId') orgId: string, @Query('search') search?: string) {
@@ -23,21 +24,21 @@ export class CustomersController {
   }
 
   @Get(':id')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.CASHIER, UserRole.SALES_REP)
+  @Roles(...ROLE_GROUPS.customersRead)
   @ApiOperation({ summary: 'Obtenir la fiche client avec son historique de facturation et paiements' })
   async findById(@CurrentUser('organizationId') orgId: string, @Param('id') id: string) {
     return this.customersService.findById(orgId, id);
   }
 
   @Post()
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.CASHIER, UserRole.SALES_REP)
+  @Roles(...ROLE_GROUPS.customersCreate)
   @ApiOperation({ summary: 'Créer un nouveau client' })
   async create(@CurrentUser('organizationId') orgId: string, @Body() body: any) {
     return this.customersService.create(orgId, body);
   }
 
   @Patch(':id')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.CASHIER, UserRole.SALES_REP)
+  @Roles(...ROLE_GROUPS.customersUpdate)
   @ApiOperation({ summary: 'Mettre à jour un client' })
   async update(
     @CurrentUser('organizationId') orgId: string,
@@ -48,7 +49,7 @@ export class CustomersController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER)
+  @Roles(...ROLE_GROUPS.customersDelete)
   @ApiOperation({ summary: 'Supprimer un client' })
   async remove(
     @CurrentUser('organizationId') orgId: string,

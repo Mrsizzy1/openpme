@@ -52,13 +52,17 @@ import {
 } from '../components/ui';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { INVOICE_STATUS, PAYMENT_METHOD_LABELS, SALE_STATUS, getStatusMeta } from '../lib/status';
+import { useRealtime } from '../lib/realtime';
+import { can } from '../role-permissions';
 import './SalesPage.css';
 
 export const SalesPage: React.FC = () => {
-  const { organization } = useAuth();
+  const { organization, user } = useAuth();
+  // L'auditeur consulte le journal des ventes sans accès à la caisse.
+  const canSell = can(user?.role, 'sell');
   const { success, error: toastError } = useToast();
   const confirm = useConfirm();
-  const [activeTab, setActiveTab] = useState<'pos' | 'history'>('pos');
+  const [activeTab, setActiveTab] = useState<'pos' | 'history'>(() => (can(user?.role, 'sell') ? 'pos' : 'history'));
   const [products, setProducts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
@@ -571,6 +575,33 @@ export const SalesPage: React.FC = () => {
     COMPLETED: 'badge-success', PENDING: 'badge-warning', CANCELLED: 'badge-danger', PARTIAL: 'badge-info',
   };
 
+  /**
+   * Actualisation déclenchée par un autre poste : catalogue, stock, clients, journal et caisses.
+   * Le panier et le client sélectionné ne sont jamais touchés.
+   */
+  const refreshLive = async () => {
+    if (offlineSnapshotAt) return;
+    try {
+      const [prods, custs, sales, cdfSession, usdSession] = await Promise.all([
+        ApiClient.getProducts(),
+        ApiClient.getCustomers(),
+        ApiClient.getSales(100),
+        ApiClient.getCurrentCashSession(Currency.CDF),
+        ApiClient.getCurrentCashSession(Currency.USD),
+      ]);
+      setProducts(prods);
+      setCustomers(custs);
+      setSalesHistory(sales);
+      setCashSessions({ [Currency.CDF]: cdfSession, [Currency.USD]: usdSession });
+    } catch {
+      // Réseau indisponible : la prochaine actualisation rattrapera l'écart.
+    }
+  };
+
+  useRealtime(['sales', 'products', 'customers', 'finances', 'payments'], () => {
+    void refreshLive();
+  });
+
   // Ticket affiché : F4 ou Entrée lance une nouvelle vente.
   useEffect(() => {
     if (!successSale) return undefined;
@@ -681,6 +712,7 @@ export const SalesPage: React.FC = () => {
 
       <div className="sales-topbar">
         <div className="tabs mb-0" role="tablist" aria-label="Caisse et journal">
+          {canSell && (
           <button
             type="button"
             role="tab"
@@ -692,6 +724,7 @@ export const SalesPage: React.FC = () => {
             Caisse
             {cart.length > 0 && <span className="tab-count">{cartCount}</span>}
           </button>
+          )}
           <button
             type="button"
             role="tab"
@@ -705,6 +738,7 @@ export const SalesPage: React.FC = () => {
           </button>
         </div>
 
+        {canSell && (
         <div className="sales-topbar-end">
           <span className="sales-shortcuts" title="Raccourcis clavier de la caisse">
             <Keyboard size={14} aria-hidden="true" />
@@ -719,9 +753,10 @@ export const SalesPage: React.FC = () => {
             <a href="/sales?posMode=cashier" className="btn btn-secondary btn-sm">Mode caisse plein écran</a>
           )}
         </div>
+        )}
       </div>
 
-      {activeTab === 'pos' ? (
+      {activeTab === 'pos' && canSell ? (
         <div className="sales-pos">
           {/* Catalogue */}
           <section className="card sales-catalog" aria-label="Catalogue des articles">
@@ -748,8 +783,8 @@ export const SalesPage: React.FC = () => {
                     title="Catalogue vide"
                     description={offlineSnapshotAt
                       ? 'Aucun produit n’est disponible dans le catalogue hors ligne. Reconnectez-vous et actualisez après le chargement du catalogue par un responsable.'
-                      : 'Aucun produit actif. Ajoutez vos articles au catalogue avant de commencer les ventes.'}
-                    action={!offlineSnapshotAt ? <a href="/products" className="btn btn-primary btn-sm">Ouvrir le catalogue</a> : undefined}
+                      : (can(user?.role, 'manageProducts') ? 'Aucun produit actif. Ajoutez vos articles au catalogue avant de commencer les ventes.' : 'Aucun produit actif. Demandez à votre responsable d’ajouter les articles au catalogue.')}
+                    action={!offlineSnapshotAt && can(user?.role, 'manageProducts') ? <a href="/products" className="btn btn-primary btn-sm">Ouvrir le catalogue</a> : undefined}
                   />
                 ) : search.trim() ? (
                   <EmptyState

@@ -33,6 +33,8 @@ import {
 } from '../components/ui';
 import { formatDate, formatDateTime } from '../lib/format';
 import { PAYMENT_METHOD_LABELS } from '../lib/status';
+import { useRealtime } from '../lib/realtime';
+import { can } from '../role-permissions';
 import './FinancesPage.css';
 
 
@@ -56,6 +58,10 @@ export const FinancesPage: React.FC = () => {
   const { organization, user } = useAuth();
   const { success, error: toastError } = useToast();
   const isManager = user?.role === 'ORG_OWNER' || user?.role === 'MANAGER' || user?.role === 'SUPER_ADMIN';
+  // Le caissier ne gère que sa caisse ; dépenses et comptes relèvent de la comptabilité.
+  const canViewFinances = can(user?.role, 'viewFinances');
+  const canManageExpenses = can(user?.role, 'manageExpenses');
+  const canOperateCash = can(user?.role, 'operateCash');
 
   const [expenses, setExpenses] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -103,13 +109,14 @@ export const FinancesPage: React.FC = () => {
   const [b500, setB500] = useState<string>('');
   const [bPieces, setBPieces] = useState<string>('');
 
-  const loadFinances = async () => {
+  /** `silent` : actualisation en arrière-plan, sans écran de chargement. */
+  const loadFinances = async (silent?: unknown) => {
     try {
-      setLoading(true);
+      if (silent !== true) setLoading(true);
       setLoadError(null);
       const [exps, accs, regs, session, cdfSession, usdSession] = await Promise.all([
-        ApiClient.getExpenses(),
-        ApiClient.getFinancialAccounts(),
+        canViewFinances ? ApiClient.getExpenses() : Promise.resolve([]),
+        canViewFinances ? ApiClient.getFinancialAccounts() : Promise.resolve([]),
         ApiClient.getCashRegisters(),
         ApiClient.getCurrentCashSession(cashCurrency),
         ApiClient.getCurrentCashSession(Currency.CDF),
@@ -273,6 +280,9 @@ export const FinancesPage: React.FC = () => {
   const diff = subtractMoney(countedBalance || '0', String(theoreticalTotal));
 
   const { refreshIndicators } = useShell();
+  useRealtime(['finances', 'payments', 'sales'], () => {
+    void loadFinances(true);
+  });
   // L'en-tête (« Caisse ouverte / fermée ») suit l'ouverture et la clôture de session.
   useEffect(() => {
     refreshIndicators();
@@ -342,7 +352,7 @@ export const FinancesPage: React.FC = () => {
 
   return (
     <div className="page">
-      <div className="finances-top">
+      <div className={`finances-top${canViewFinances ? '' : ' is-single'}`}>
         {/* Session de caisse */}
         <SectionCard
           title={currentSession ? `Caisse ${cashCurrency} ouverte` : `Caisse ${cashCurrency} fermée`}
@@ -369,7 +379,7 @@ export const FinancesPage: React.FC = () => {
                   </button>
                 ))}
               </div>
-              {currentSession ? (
+              {canOperateCash && (currentSession ? (
                 <Button
                   size="sm"
                   variant="danger-outline"
@@ -395,7 +405,7 @@ export const FinancesPage: React.FC = () => {
                 >
                   Ouvrir
                 </Button>
-              )}
+              ))}
             </>
           )}
         >
@@ -439,6 +449,7 @@ export const FinancesPage: React.FC = () => {
         </SectionCard>
 
         {/* Comptes financiers */}
+        {canViewFinances && (
         <SectionCard
           title="Comptes financiers"
           description="Banques et portefeuilles Mobile Money"
@@ -467,9 +478,11 @@ export const FinancesPage: React.FC = () => {
             </ul>
           )}
         </SectionCard>
+        )}
       </div>
 
       {/* Journal des dépenses */}
+      {canViewFinances && (
       <SectionCard
         title="Journal des dépenses"
         icon={ArrowDownCircle}
@@ -479,7 +492,7 @@ export const FinancesPage: React.FC = () => {
           <>
             <Button size="sm" icon={<FileSpreadsheet size={13} />} onClick={exportExpenses}>Exporter vers Excel</Button>
             <IconButton icon={<RefreshCw />} size="sm" variant="secondary" aria-label="Actualiser" onClick={loadFinances} />
-            <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={openExpenseModal}>Nouvelle dépense</Button>
+            {canManageExpenses && <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={openExpenseModal}>Nouvelle dépense</Button>}
           </>
         )}
       >
@@ -488,7 +501,7 @@ export const FinancesPage: React.FC = () => {
             icon={ArrowDownCircle}
             title="Aucune dépense enregistrée"
             description="Enregistrez vos dépenses pour suivre la trésorerie et la marge nette."
-            action={<Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={openExpenseModal}>Enregistrer une dépense</Button>}
+            action={canManageExpenses ? <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={openExpenseModal}>Enregistrer une dépense</Button> : undefined}
           />
         ) : (
           <div className="table-container">
@@ -525,6 +538,7 @@ export const FinancesPage: React.FC = () => {
           </div>
         )}
       </SectionCard>
+      )}
 
       {/* Nouvelle dépense */}
       <Modal

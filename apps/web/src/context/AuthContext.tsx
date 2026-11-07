@@ -98,7 +98,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [success]);
 
-  // Heartbeat actif : détection automatique de toute modification en ligne / distant toutes les 6 secondes
+  // Vérification périodique du taux (secours si le flux temps réel est coupé)
   useEffect(() => {
     if (!user) return;
 
@@ -138,8 +138,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     window.addEventListener('focus', handleFocus);
 
-    // Polling régulier à 6 secondes
-    const interval = setInterval(checkServerRate, 6000);
+    // Filet de sécurité : le temps réel signale déjà les changements de taux instantanément.
+    const interval = setInterval(checkServerRate, 60_000);
 
     return () => {
       window.removeEventListener('focus', handleFocus);

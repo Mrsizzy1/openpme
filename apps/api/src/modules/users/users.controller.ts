@@ -6,6 +6,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
+import { ROLE_GROUPS } from '../../common/security/role-groups';
 
 @ApiTags('Users & RBAC')
 @Controller('users')
@@ -15,14 +16,14 @@ export class UsersController {
   constructor(private usersService: UsersService) {}
 
   @Get()
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER)
+  @Roles(...ROLE_GROUPS.usersRead)
   @ApiOperation({ summary: 'Lister les collaborateurs et leurs rôles RBAC' })
   async findAll(@CurrentUser('organizationId') orgId: string) {
     return this.usersService.findAll(orgId);
   }
 
   @Get(':id')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER)
+  @Roles(...ROLE_GROUPS.usersRead)
   @ApiOperation({ summary: 'Consulter le profil et rôle d\'un utilisateur' })
   async findById(@CurrentUser('organizationId') orgId: string, @Param('id') id: string) {
     return this.usersService.findById(orgId, id);

@@ -22,6 +22,7 @@ import {
   useConfirm,
 } from '../components/ui';
 import { formatNumber } from '../lib/format';
+import { useRealtime } from '../lib/realtime';
 import './ProductsPage.css';
 
 function decimalInput(value: string): string {
@@ -324,6 +325,10 @@ export const ProductsPage: React.FC = () => {
   useEffect(() => {
     if (hasLoadedOnce.current) refreshIndicators();
   }, [lowStockCount, refreshIndicators]);
+
+  useRealtime(['products', 'sales'], () => {
+    if (hasLoadedOnce.current) void loadData();
+  });
 
   const handleDeleteProduct = async (product: any) => {
     const confirmed = await confirm({

@@ -11,6 +11,7 @@ import { ShellContext, type ShellContextValue } from './lib/shell';
 import { BootScreen } from './components/ui/BootScreen';
 import { PageSkeleton } from './components/ui/LoadingState';
 import { RouteErrorBoundary } from './components/ui/ErrorBoundary';
+import { realtime, useRealtime } from './lib/realtime';
 
 // Pages chargées à la demande : démarrage plus rapide, et une page en erreur n'empêche pas les autres de s'afficher.
 const LoginPage = lazy(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
@@ -28,7 +29,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ de
 
 /** Enveloppe commune des pages connectées : barre latérale + en-tête persistants. */
 const ProtectedLayout: React.FC = () => {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading, user, refreshProfile } = useAuth();
   const location = useLocation();
   const [activeSession, setActiveSession] = useState<any | null>(null);
   const [anomalyCount, setAnomalyCount] = useState<number>(0);
@@ -46,6 +47,19 @@ const ProtectedLayout: React.FC = () => {
     ApiClient.getAnomalies('DETECTED').then((res) => setAnomalyCount(res.length)).catch(() => {});
     ApiClient.getLowStock().then((res) => setLowStockCount(res.length)).catch(() => {});
   }, [isAuthenticated, location.pathname, refreshKey]);
+
+  // Synchronisation en temps réel avec les autres postes de l'entreprise.
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    realtime.start();
+    return () => realtime.stop();
+  }, [isAuthenticated]);
+
+  useRealtime(['sales', 'finances', 'anomalies', 'products', 'payments'], refreshIndicators);
+  // Taux du jour, profil et droits modifiés depuis un autre poste.
+  useRealtime(['organizations', 'users'], () => {
+    void refreshProfile().catch(() => undefined);
+  });
 
   // Le tiroir de navigation (petits écrans) se ferme à chaque changement de page ou avec Échap.
   useEffect(() => {

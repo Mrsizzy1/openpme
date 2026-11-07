@@ -6,6 +6,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole, Currency } from '@prisma/client';
+import { ROLE_GROUPS } from '../../common/security/role-groups';
 
 @ApiTags('Suppliers')
 @Controller('suppliers')
@@ -15,7 +16,7 @@ export class SuppliersController {
   constructor(private suppliersService: SuppliersService) {}
 
   @Get()
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.INVENTORY_MANAGER, UserRole.PURCHASER)
+  @Roles(...ROLE_GROUPS.suppliersRead)
   @ApiOperation({ summary: 'Lister les fournisseurs avec recherche' })
   @ApiQuery({ name: 'search', required: false })
   async findAll(@CurrentUser('organizationId') orgId: string, @Query('search') search?: string) {
@@ -23,14 +24,14 @@ export class SuppliersController {
   }
 
   @Get(':id')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.INVENTORY_MANAGER, UserRole.PURCHASER)
+  @Roles(...ROLE_GROUPS.suppliersRead)
   @ApiOperation({ summary: 'Obtenir la fiche fournisseur et historique' })
   async findById(@CurrentUser('organizationId') orgId: string, @Param('id') id: string) {
     return this.suppliersService.findById(orgId, id);
   }
 
   @Post()
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.PURCHASER)
+  @Roles(...ROLE_GROUPS.suppliersCreate)
   @ApiOperation({ summary: 'Enregistrer un nouveau fournisseur' })
   async create(
     @CurrentUser('organizationId') orgId: string,
@@ -48,7 +49,7 @@ export class SuppliersController {
   }
 
   @Patch(':id')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.INVENTORY_MANAGER, UserRole.PURCHASER)
+  @Roles(...ROLE_GROUPS.suppliersUpdate)
   @ApiOperation({ summary: 'Mettre à jour la fiche fournisseur' })
   async update(
     @CurrentUser('organizationId') orgId: string,
@@ -59,7 +60,7 @@ export class SuppliersController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER)
+  @Roles(...ROLE_GROUPS.suppliersDelete)
   @ApiOperation({ summary: 'Désactiver un fournisseur' })
   async remove(@CurrentUser('organizationId') orgId: string, @Param('id') id: string) {
     return this.suppliersService.delete(orgId, id);

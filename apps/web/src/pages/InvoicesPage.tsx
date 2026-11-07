@@ -23,6 +23,8 @@ import {
 } from '../components/ui';
 import { formatDate } from '../lib/format';
 import { INVOICE_STATUS, getStatusMeta } from '../lib/status';
+import { useRealtime } from '../lib/realtime';
+import { can } from '../role-permissions';
 import './InvoicesPage.css';
 
 const FILTER_OPTIONS = [
@@ -37,7 +39,8 @@ const FILTER_OPTIONS = [
 const statusLabel = (status: string) => getStatusMeta(INVOICE_STATUS, status).label;
 
 export const InvoicesPage: React.FC = () => {
-  const { organization } = useAuth();
+  const { organization, user } = useAuth();
+  const canCollect = can(user?.role, 'collectPayment');
   const { success, error: toastError } = useToast();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
@@ -77,6 +80,10 @@ export const InvoicesPage: React.FC = () => {
   useEffect(() => {
     loadInvoices();
   }, [statusFilter]);
+
+  useRealtime(['invoices', 'payments', 'sales'], () => {
+    if (hasLoadedOnce.current) void loadInvoices();
+  });
 
   useEffect(() => {
     let active = true;
@@ -308,7 +315,7 @@ export const InvoicesPage: React.FC = () => {
                   <td className="col-actions">
                     <div className="invoices-actions">
                       <IconButton icon={<Eye />} size="sm" aria-label={`Voir la facture ${inv.invoiceNumber}`} title="Voir et imprimer" onClick={() => setSelectedInvoice(inv)} />
-                      {balance > 0 && (
+                      {balance > 0 && canCollect && (
                         <Button size="sm" variant="primary" icon={<CreditCard size={13} />} onClick={() => handleOpenPayment(inv)}>
                           Régler
                         </Button>

@@ -29,6 +29,8 @@ import {
 } from '../components/ui';
 import { formatDate, formatRelativeTime } from '../lib/format';
 import type { Tone } from '../lib/tone';
+import { useRealtime } from '../lib/realtime';
+import { can } from '../role-permissions';
 import './UsersPage.css';
 
 interface UserItem {
@@ -73,6 +75,7 @@ export const UsersPage: React.FC = () => {
   const { user: currentUser } = useAuth();
   const { success, error } = useToast();
   const confirm = useConfirm();
+  const canManageUsers = can(currentUser?.role, 'manageUsers');
 
   const [users, setUsers] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,6 +113,10 @@ export const UsersPage: React.FC = () => {
     }, 30_000);
     return () => window.clearInterval(refreshInterval);
   }, []);
+
+  useRealtime(['users'], () => {
+    if (hasLoadedOnce.current) void fetchUsers();
+  });
 
   const onlineCount = users.filter((u) => u.isOnline).length;
   const activeCount = users.filter((u) => u.isActive).length;
@@ -226,7 +233,7 @@ export const UsersPage: React.FC = () => {
           icon={Users}
           title="Aucun collaborateur pour le moment"
           description="Ajoutez les membres de votre équipe et attribuez-leur un rôle adapté à leur poste."
-          action={<Button variant="primary" icon={<UserPlus size={15} />} onClick={() => setShowModal(true)}>Nouveau collaborateur</Button>}
+          action={canManageUsers ? <Button variant="primary" icon={<UserPlus size={15} />} onClick={() => setShowModal(true)}>Nouveau collaborateur</Button> : undefined}
         />
       );
     }
@@ -260,7 +267,7 @@ export const UsersPage: React.FC = () => {
               const roleInfo = ROLE_INFO[u.role] || { label: u.role, tone: 'neutral' as Tone, desc: 'Rôle personnalisé' };
               const isMe = u.id === currentUser?.id;
               const isProtected = u.role === 'ORG_OWNER' || u.role === 'SUPER_ADMIN';
-              const canManageUser = !isMe && !isProtected;
+              const canManageUser = canManageUsers && !isMe && !isProtected;
               const fullName = `${u.firstName} ${u.lastName}`;
 
               return (
@@ -368,9 +375,11 @@ export const UsersPage: React.FC = () => {
         end={(
           <>
             <IconButton icon={<RefreshCw />} variant="secondary" aria-label="Actualiser la liste" onClick={fetchUsers} />
-            <Button variant="primary" icon={<UserPlus size={15} />} onClick={() => setShowModal(true)}>
-              Nouveau collaborateur
-            </Button>
+            {canManageUsers && (
+              <Button variant="primary" icon={<UserPlus size={15} />} onClick={() => setShowModal(true)}>
+                Nouveau collaborateur
+              </Button>
+            )}
           </>
         )}
       />

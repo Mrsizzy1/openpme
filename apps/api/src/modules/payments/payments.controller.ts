@@ -7,12 +7,13 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
+import { ROLE_GROUPS } from '../../common/security/role-groups';
 import { CreatePaymentDto } from './payments.dto';
 
 @ApiTags('Payments & Receipts')
 @Controller('payments')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.CASHIER)
+@Roles(...ROLE_GROUPS.paymentsCollect)
 @ApiBearerAuth()
 export class PaymentsController {
   constructor(
@@ -21,6 +22,7 @@ export class PaymentsController {
   ) {}
 
   @Get()
+  @Roles(...ROLE_GROUPS.paymentsRead)
   @ApiOperation({ summary: 'Lister les paiements et reçus' })
   @ApiQuery({ name: 'invoiceId', required: false })
   async findAll(

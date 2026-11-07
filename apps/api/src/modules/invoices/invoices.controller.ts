@@ -6,11 +6,12 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { InvoiceStatus, UserRole } from '@prisma/client';
+import { ROLE_GROUPS } from '../../common/security/role-groups';
 
 @ApiTags('Invoices & Billing')
 @Controller('invoices')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.CASHIER)
+@Roles(...ROLE_GROUPS.invoicesRead)
 @ApiBearerAuth()
 export class InvoicesController {
   constructor(private invoicesService: InvoicesService) {}
@@ -32,12 +33,14 @@ export class InvoicesController {
   }
 
   @Post()
+  @Roles(...ROLE_GROUPS.invoicesWrite)
   @ApiOperation({ summary: 'Créer une facture avec numérotation automatique' })
   async createInvoice(@CurrentUser('organizationId') orgId: string, @Body() body: any) {
     return this.invoicesService.createInvoice(orgId, body);
   }
 
   @Patch(':id/cancel')
+  @Roles(...ROLE_GROUPS.invoicesWrite)
   @ApiOperation({ summary: 'Annuler une facture avec justification' })
   async cancelInvoice(
     @CurrentUser('organizationId') orgId: string,

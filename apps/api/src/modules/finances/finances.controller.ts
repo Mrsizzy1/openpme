@@ -6,6 +6,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
+import { ROLE_GROUPS } from '../../common/security/role-groups';
 import { CloseCashSessionDto, OpenCashSessionDto } from './cash-session.dto';
 import { CreateExpenseDto } from './expense.dto';
 import { Currency } from '@prisma/client';
@@ -13,18 +14,20 @@ import { Currency } from '@prisma/client';
 @ApiTags('Finances & Cash Management')
 @Controller('finances')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN, UserRole.ORG_OWNER, UserRole.MANAGER, UserRole.ACCOUNTANT, UserRole.CASHIER)
+@Roles(...ROLE_GROUPS.cashRead)
 @ApiBearerAuth()
 export class FinancesController {
   constructor(private financesService: FinancesService) {}
 
   @Get('expenses')
+  @Roles(...ROLE_GROUPS.financesRead)
   @ApiOperation({ summary: 'Lister les dépenses de l’entreprise' })
   async listExpenses(@CurrentUser('organizationId') orgId: string) {
     return this.financesService.listExpenses(orgId);
   }
 
   @Post('expenses')
+  @Roles(...ROLE_GROUPS.financesWrite)
   @ApiOperation({ summary: 'Enregistrer une dépense avec validation et contrôle de seuil' })
   async createExpense(
     @CurrentUser('organizationId') orgId: string,
@@ -51,6 +54,7 @@ export class FinancesController {
   }
 
   @Post('cash-sessions/open')
+  @Roles(...ROLE_GROUPS.cashOperate)
   @ApiOperation({ summary: 'Ouvrir une nouvelle session de caisse avec fond de roulement initial' })
   async openSession(
     @CurrentUser('organizationId') orgId: string,
@@ -61,6 +65,7 @@ export class FinancesController {
   }
 
   @Patch('cash-sessions/:id/close')
+  @Roles(...ROLE_GROUPS.cashOperate)
   @ApiOperation({ summary: 'Clôturer la session de caisse, calculer l’écart théorique vs réel et alerter' })
   async closeSession(
     @CurrentUser('organizationId') orgId: string,
@@ -71,6 +76,7 @@ export class FinancesController {
   }
 
   @Get('accounts')
+  @Roles(...ROLE_GROUPS.financesRead)
   @ApiOperation({ summary: 'Lister les comptes bancaires et Mobile Money' })
   async listAccounts(@CurrentUser('organizationId') orgId: string) {
     return this.financesService.listAccounts(orgId);

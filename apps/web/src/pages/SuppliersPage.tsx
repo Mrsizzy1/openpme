@@ -18,6 +18,8 @@ import {
   TableSkeleton,
 } from '../components/ui';
 import { formatMoney, formatNumber } from '../lib/format';
+import { useRealtime } from '../lib/realtime';
+import { can } from '../role-permissions';
 
 interface SupplierItem {
   id: string;
@@ -34,7 +36,8 @@ interface SupplierItem {
 }
 
 export const SuppliersPage: React.FC = () => {
-  const { organization } = useAuth();
+  const { organization, user } = useAuth();
+  const canCreate = can(user?.role, 'createSupplier');
   const { success, error } = useToast();
   const primaryCurrency = organization?.settings?.primaryCurrency || 'CDF';
 
@@ -84,6 +87,10 @@ export const SuppliersPage: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [search]);
 
+  useRealtime(['suppliers'], () => {
+    if (hasLoadedOnce.current) void fetchSuppliers();
+  });
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -124,7 +131,7 @@ export const SuppliersPage: React.FC = () => {
           icon={Truck}
           title="Aucun fournisseur enregistré"
           description="Enregistrez vos fournisseurs pour suivre vos achats et vos dettes d’approvisionnement."
-          action={<Button variant="primary" icon={<Plus size={15} />} onClick={() => setShowModal(true)}>Nouveau fournisseur</Button>}
+          action={canCreate ? <Button variant="primary" icon={<Plus size={15} />} onClick={() => setShowModal(true)}>Nouveau fournisseur</Button> : undefined}
         />
       );
     }
@@ -199,9 +206,11 @@ export const SuppliersPage: React.FC = () => {
         end={(
           <>
             <IconButton icon={<RefreshCw />} variant="secondary" aria-label="Actualiser la liste" onClick={fetchSuppliers} />
-            <Button variant="primary" icon={<Plus size={15} />} onClick={() => setShowModal(true)}>
-              Nouveau fournisseur
-            </Button>
+            {canCreate && (
+              <Button variant="primary" icon={<Plus size={15} />} onClick={() => setShowModal(true)}>
+                Nouveau fournisseur
+              </Button>
+            )}
           </>
         )}
       />

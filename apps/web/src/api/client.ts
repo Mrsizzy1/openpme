@@ -6,6 +6,9 @@ const getApiBaseUrl = () => (
     : `${window.location.protocol}//${window.location.hostname}:3001/api/v1`)
 ).replace(/\/+$/, '');
 
+/** Identifie cet onglet ou ce poste : il ignore l'écho temps réel de ses propres modifications. */
+export const CLIENT_INSTANCE_ID = `web_${Math.random().toString(36).slice(2, 10)}`;
+
 export class ApiClientError extends Error {
   constructor(message: string, readonly statusCode: number) {
     super(message);
@@ -128,9 +131,21 @@ export class ApiClient {
     await this.request('/auth/logout', { method: 'POST' });
   }
 
+  /** Adresse de base de l'API (utilisée par le flux temps réel). */
+  static getBaseUrl(): string {
+    return getApiBaseUrl();
+  }
+
+  /** Renouvelle le jeton d'accès à partir du cookie de session (flux temps réel). */
+  static async renewAccessToken(): Promise<string | null> {
+    await this.refreshSession();
+    return this.getToken();
+  }
+
   private static async send<T>(endpoint: string, options: RequestInit, token: string | null) {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'X-Client-Instance': CLIENT_INSTANCE_ID,
       ...(options.headers as Record<string, string>),
     };
 
