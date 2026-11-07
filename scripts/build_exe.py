@@ -15,11 +15,31 @@ def build_windows_exe():
 
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     main_script = os.path.join(base_dir, "apps", "desktop-py", "main.py")
+    web_dist = os.path.join(base_dir, "apps", "web", "dist")
     dist_dir = os.path.join(base_dir, "dist_desktop")
     build_dir = os.path.join(base_dir, "build_desktop")
 
     if not os.path.exists(main_script):
         print(f"[ERREUR] Script introuvable : {main_script}")
+        return False
+
+    npm_command = shutil.which("npm.cmd") or shutil.which("npm")
+    if not npm_command:
+        print("[ERREUR] npm est introuvable. Installez Node.js puis réessayez.")
+        return False
+
+    print("\nCompilation de l'interface Web embarquée...")
+    web_build = subprocess.run(
+        f'call "{npm_command}" run build:web',
+        cwd=base_dir,
+        shell=True,
+    )
+    if web_build.returncode != 0:
+        print("\n[ERREUR] Échec de la compilation de l'interface Web.")
+        return False
+
+    if not os.path.isfile(os.path.join(web_dist, "index.html")):
+        print(f"[ERREUR] Interface Web générée introuvable : {web_dist}")
         return False
 
     # Commande PyInstaller optimisée
@@ -34,6 +54,7 @@ def build_windows_exe():
         "--collect-all=PyQt6",
         "--collect-all=PyQt6.QtWebEngineWidgets",
         "--collect-all=PyQt6.QtWebEngineCore",
+        f"--add-data={web_dist};web-dist",
         main_script,
     ]
 

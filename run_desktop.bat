@@ -5,6 +5,14 @@ echo   Smart PME Finance - Demarrage du Poste Desktop PyQt6
 echo ========================================================
 echo.
 
+call npm run build:web
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [ERREUR] Impossible de compiler l'interface Web embarquee.
+    pause
+    exit /b 1
+)
+
 python apps\desktop-py\main.py
 
 if %ERRORLEVEL% NEQ 0 (

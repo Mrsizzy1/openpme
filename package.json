@@ -10,8 +10,8 @@
   "scripts": {
     "dev:api": "npm --workspace=apps/api run start:dev",
     "dev:web": "npm --workspace=apps/web run dev",
-    "dev:desktop": "python apps/desktop-py/main.py",
-    "desktop:py": "python apps/desktop-py/main.py",
+    "dev:desktop": "npm run build:web && python apps/desktop-py/main.py",
+    "desktop:py": "npm run build:web && python apps/desktop-py/main.py",
     "build:shared": "npm --workspace=packages/shared run build",
     "build:api": "npm --workspace=apps/api run build",
     "build:web": "npm --workspace=apps/web run build",

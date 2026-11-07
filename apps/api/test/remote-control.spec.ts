@@ -80,6 +80,49 @@ describe('remote desktop control', () => {
     await assert.rejects(service.heartbeat('invalid-token', {}, '192.0.2.4'), /révoqué ou invalide/);
   });
 
+  it('reports revoked credentials in the terminal list', async () => {
+    const service = new RemoteControlService({
+      desktopTerminal: {
+        findMany: async () => [{
+          id: 'record-1',
+          terminalId: 'DESKTOP-01',
+          organizationId: 'org-a',
+          displayName: 'Caisse 1',
+          lastHeartbeatAt: null,
+          lastIpAddress: null,
+          status: DesktopTerminalStatus.LOCKED,
+          lockReason: 'Jeton révoqué',
+          lockedAt: null,
+          lockedBy: null,
+          stateVersion: 3,
+          acknowledgedVersion: 2,
+          lastAcknowledgedAt: null,
+          tokenRevokedAt: new Date(),
+          offlineGraceHours: 24,
+        }],
+      },
+    } as any);
+
+    const terminals = await service.listTerminals('org-a');
+    assert.equal(terminals[0].tokenRevoked, true);
+  });
+
+  it('requires re-enrollment before unlocking a revoked terminal', async () => {
+    const service = new RemoteControlService({
+      desktopTerminal: {
+        findFirst: async () => ({
+          id: 'record-1',
+          tokenRevokedAt: new Date(),
+        }),
+      },
+    } as any);
+
+    await assert.rejects(
+      service.unlockTerminal('org-a', 'DESKTOP-01', 'manager-1', 'Réouverture', '192.0.2.10'),
+      /réenrôlement est requis/,
+    );
+  });
+
   it('persists a scoped lock transition and its audit event', async () => {
     let auditEvent: any;
     const terminal = {

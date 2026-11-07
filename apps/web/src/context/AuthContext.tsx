@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { ApiClient } from '../api/client';
 import { useToast } from './ToastContext';
+import { offlineSync } from '../services/offlineSync';
 
 interface AuthContextType {
   user: any | null;
@@ -38,7 +39,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(res.user);
           setOrganization(res.organization);
         })
-        .catch(() => {
+        .catch((error) => {
+          if (ApiClient.isNetworkFailure(error)) {
+            offlineSync.markBackendUnavailable();
+          }
+          const cachedUser = ApiClient.getSavedUser();
+          const cachedOrganization = ApiClient.getSavedOrg();
+          if (
+            window.SMART_PME_CONFIG?.desktop
+            && ApiClient.isNetworkFailure(error)
+            && cachedUser
+            && cachedOrganization
+          ) {
+            setUser(cachedUser);
+            setOrganization(cachedOrganization);
+            return;
+          }
           ApiClient.clearAuth();
           setUser(null);
           setOrganization(null);

@@ -227,6 +227,12 @@ export class SalesService {
           }]
           : [];
 
+      if (immediatePayment && salePayments.some((payment) => payment.method !== PaymentMethod.CASH)) {
+        throw new BadRequestException(
+          'Les paiements électroniques ou par banque ne sont pas vérifiables par le système. Enregistrez la vente à crédit, puis comptabilisez le règlement après confirmation effective.',
+        );
+      }
+
       const preparedPayments: Array<{
         amount: Prisma.Decimal;
         currency: Currency;
@@ -322,26 +328,11 @@ export class SalesService {
           }
           const newStock = currentStock - item.quantity;
           if (newStock < 0) {
-            await transaction.anomalyAlert.create({
-              data: {
-                organizationId,
-                ruleType: AnomalyRuleType.NEGATIVE_STOCK,
-                severity: AnomalySeverity.HIGH,
-                status: AnomalyStatus.DETECTED,
-                title: 'Stock négatif après tentative de vente',
-                explanation: `Vente de ${item.quantity} unités de "${item.product.name}" alors que le stock disponible était de ${currentStock}.`,
-                entityType: 'Product',
-                entityId: item.product.id,
-                observedValue: `${newStock} unités`,
-                expectedThreshold: 'Stock >= 0',
-              },
-            });
+            throw new BadRequestException(
+              `Stock insuffisant pour "${item.product.name}" : ${currentStock} disponible(s), ${item.quantity} demandé(s).`,
+            );
           }
 
-          await transaction.product.update({
-            where: { id: item.product.id },
-            data: { currentStock: newStock },
-          });
           const warehouseStock = await transaction.warehouseStock.findUnique({
             where: {
               warehouseId_productId: {
@@ -350,10 +341,27 @@ export class SalesService {
               },
             },
           });
+          if (warehouseStock && warehouseStock.quantity < item.quantity) {
+            throw new BadRequestException(
+              `Stock insuffisant dans le dépôt pour "${item.product.name}" : ${warehouseStock.quantity} disponible(s), ${item.quantity} demandé(s).`,
+            );
+          }
+          await transaction.product.update({
+            where: { id: item.product.id },
+            data: { currentStock: newStock },
+          });
           if (warehouseStock) {
             await transaction.warehouseStock.update({
               where: { id: warehouseStock.id },
               data: { quantity: warehouseStock.quantity - item.quantity },
+            });
+          } else {
+            await transaction.warehouseStock.create({
+              data: {
+                warehouseId: defaultWarehouse.id,
+                productId: item.product.id,
+                quantity: newStock,
+              },
             });
           }
           await transaction.stockMovement.create({

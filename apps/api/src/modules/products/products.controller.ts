@@ -85,8 +85,12 @@ export class ProductsController {
   @Post()
   @Roles(...PRODUCT_MANAGEMENT_ROLES)
   @ApiOperation({ summary: 'Créer un nouveau produit ou service' })
-  async create(@CurrentUser('organizationId') orgId: string, @Body() body: CreateProductDto) {
-    return this.productsService.create(orgId, body);
+  async create(
+    @CurrentUser('organizationId') orgId: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: CreateProductDto,
+  ) {
+    return this.productsService.create(orgId, userId, body);
   }
 
   @Patch(':id')

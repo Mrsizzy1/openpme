@@ -49,47 +49,69 @@ export class ProductsService {
     return product;
   }
 
-  async create(organizationId: string, data: CreateProductDto) {
+  async create(organizationId: string, userId: string, data: CreateProductDto) {
     const purchasePrice = decimalAmount(data.purchasePrice ?? '0', 'prix d’achat');
     const salePrice = decimalAmount(data.salePrice, 'prix de vente');
     if (purchasePrice.lt(0)) throw new BadRequestException('Le prix d’achat ne peut pas être négatif.');
     if (salePrice.lte(0)) throw new BadRequestException('Le prix de vente doit être supérieur à zéro.');
     if (data.categoryId) await this.ensureCategoryBelongsToOrganization(organizationId, data.categoryId);
 
-    const defaultWarehouse = await this.prisma.warehouse.findFirst({
-      where: { organizationId, isDefault: true },
-    });
+    return this.prisma.$transaction(async (transaction) => {
+      const defaultWarehouse = data.isService
+        ? null
+        : await transaction.warehouse.findFirst({
+          where: { organizationId, isDefault: true },
+        });
+      if (!data.isService && !defaultWarehouse) {
+        throw new BadRequestException('Aucun dépôt de stockage par défaut configuré.');
+      }
 
-    const product = await this.prisma.product.create({
-      data: {
-        organizationId,
-        code: data.code || `PRD-${Date.now().toString().slice(-6)}`,
-        barcode: data.barcode,
-        name: data.name,
-        description: data.description,
-        categoryId: data.categoryId,
-        purchasePrice,
-        salePrice,
-        currency: data.currency || Currency.CDF,
-        minStockLevel: data.minStockLevel ?? 5,
-        currentStock: data.initialStock ?? 0,
-        unit: data.unit || 'Pièce',
-        isService: Boolean(data.isService),
-      },
-      include: { category: true },
-    });
-
-    if (defaultWarehouse && !product.isService) {
-      await this.prisma.warehouseStock.create({
+      const product = await transaction.product.create({
         data: {
-          warehouseId: defaultWarehouse.id,
-          productId: product.id,
-          quantity: product.currentStock,
+          organizationId,
+          code: data.code || `PRD-${Date.now().toString().slice(-6)}`,
+          barcode: data.barcode,
+          name: data.name,
+          description: data.description,
+          categoryId: data.categoryId,
+          purchasePrice,
+          salePrice,
+          currency: data.currency || Currency.CDF,
+          minStockLevel: data.minStockLevel ?? 5,
+          currentStock: data.initialStock ?? 0,
+          unit: data.unit || 'Pièce',
+          isService: Boolean(data.isService),
         },
+        include: { category: true },
       });
-    }
 
-    return product;
+      if (defaultWarehouse) {
+        await transaction.warehouseStock.create({
+          data: {
+            warehouseId: defaultWarehouse.id,
+            productId: product.id,
+            quantity: product.currentStock,
+          },
+        });
+        if (product.currentStock > 0) {
+          await transaction.stockMovement.create({
+            data: {
+              organizationId,
+              warehouseId: defaultWarehouse.id,
+              productId: product.id,
+              userId,
+              type: StockMovementType.IN_ADJUSTMENT,
+              quantity: product.currentStock,
+              previousStock: 0,
+              newStock: product.currentStock,
+              reason: 'Stock initial à la création du produit',
+            },
+          });
+        }
+      }
+
+      return product;
+    });
   }
 
   async update(organizationId: string, id: string, data: UpdateProductDto) {

@@ -171,6 +171,7 @@ export class OfflineSyncService {
   private initializationPromise: Promise<void> | null = null;
   private readonly listeners = new Set<() => void>();
   private syncing = false;
+  private backendAvailable: boolean | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: OfflineSyncOptions = {}) {
@@ -214,13 +215,56 @@ export class OfflineSyncService {
     const operations = await this.getStoredOperations();
     const pendingCount = operations.filter((operation) => operation.status === 'queued' || operation.status === 'syncing').length;
     const reviewCount = operations.filter((operation) => operation.status === 'needs_review').length;
-    const isOnline = this.isOnline();
+    const isOnline = this.isOnline() && this.backendAvailable !== false;
     const status = reviewCount > 0 ? 'error'
       : this.syncing ? 'syncing'
-        : !isOnline && pendingCount > 0 ? 'offline'
+        : !isOnline ? 'offline'
           : pendingCount > 0 ? 'syncing'
             : 'synced';
     return { status, pendingCount, reviewCount, isOnline };
+  }
+
+  markBackendUnavailable(): void {
+    this.backendAvailable = false;
+    this.emit();
+  }
+
+  markBackendAvailable(): void {
+    this.backendAvailable = true;
+    this.emit();
+  }
+
+  async saveCachedData(key: string, value: unknown): Promise<string> {
+    await this.initialize();
+    const payload = await this.encrypt(value);
+    const updatedAt = new Date().toISOString();
+    const db = await this.openDatabase();
+    const transaction = db.transaction(META_STORE, 'readwrite');
+    const done = transactionDone(transaction);
+    transaction.objectStore(META_STORE).put({ payload, updatedAt }, `cache:${key}`);
+    await done;
+    return updatedAt;
+  }
+
+  async getCachedData<T>(key: string): Promise<{ value: T; updatedAt: string } | null> {
+    await this.initialize();
+    const db = await this.openDatabase();
+    const transaction = db.transaction(META_STORE, 'readonly');
+    const done = transactionDone(transaction);
+    const record = await requestResult<{ payload: EncryptedPayload; updatedAt: string } | undefined>(
+      transaction.objectStore(META_STORE).get(`cache:${key}`),
+    );
+    await done;
+    if (!record) return null;
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: record.payload.iv },
+      await this.getEncryptionKey(),
+      record.payload.ciphertext,
+    );
+    return {
+      value: JSON.parse(new TextDecoder().decode(plaintext)) as T,
+      updatedAt: record.updatedAt,
+    };
   }
 
   async getPendingCount(): Promise<number> {
@@ -252,13 +296,17 @@ export class OfflineSyncService {
     return records.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
   }
 
-  async enqueueSale(payload: Record<string, unknown>): Promise<OfflineOperation<Record<string, unknown>>> {
+  async enqueueSale(
+    payload: Record<string, unknown>,
+    inventorySnapshot?: { key: string; value: unknown },
+  ): Promise<OfflineOperation<Record<string, unknown>>> {
     const operationId = typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey : undefined;
-    return this.enqueue('sale.create', payload, operationId);
+    return this.enqueue('sale.create', payload, operationId, inventorySnapshot);
   }
 
   async enqueueStockMovement(productId: string, payload: Record<string, unknown>): Promise<OfflineOperation> {
-    return this.enqueue('stock.move', { productId, ...payload });
+    const operationId = typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey : undefined;
+    return this.enqueue('stock.move', { productId, ...payload }, operationId);
   }
 
   async enqueuePayment(payload: Record<string, unknown>): Promise<OfflineOperation> {
@@ -320,6 +368,7 @@ export class OfflineSyncService {
         const operation = await this.decryptOperation(operations[index]);
         try {
           await this.sendOperation(operation);
+          this.backendAvailable = true;
           await this.updateOperation(operation.id, {
             status: 'synced',
             lastError: undefined,
@@ -328,6 +377,7 @@ export class OfflineSyncService {
           await this.resolveConflicts(operation.id);
           synced += 1;
         } catch (error) {
+          if (isNetworkFailure(error)) this.backendAvailable = false;
           const message = errorMessage(error);
           failed += 1;
           errors.push(`${operation.type} ${operation.id}: ${message}`);
@@ -374,7 +424,12 @@ export class OfflineSyncService {
     this.emit();
   }
 
-  private async enqueue<T>(type: OfflineOperationType, payload: T, operationId?: string): Promise<OfflineOperation<T>> {
+  private async enqueue<T>(
+    type: OfflineOperationType,
+    payload: T,
+    operationId?: string,
+    inventorySnapshot?: { key: string; value: unknown },
+  ): Promise<OfflineOperation<T>> {
     await this.initialize();
     const operation: OfflineOperation<T> = {
       id: operationId ?? createUuid(),
@@ -385,7 +440,30 @@ export class OfflineSyncService {
       attempts: 0,
       nextAttemptAt: 0,
     };
-    await this.storeOperation(operation);
+    if (inventorySnapshot) {
+      const [encryptedPayload, cachedPayload] = await Promise.all([
+        this.encrypt(operation.payload),
+        this.encrypt(inventorySnapshot.value),
+      ]);
+      const db = await this.openDatabase();
+      const transaction = db.transaction([OPERATIONS_STORE, META_STORE], 'readwrite');
+      const done = transactionDone(transaction);
+      const operations = transaction.objectStore(OPERATIONS_STORE);
+      const existing = await requestResult<StoredOperation | undefined>(operations.get(operation.id));
+      if (existing) {
+        await done;
+        const decrypted = await this.decryptOperation(existing);
+        return { ...decrypted, payload: decrypted.payload as T };
+      }
+      operations.put({ ...operation, payload: encryptedPayload });
+      transaction.objectStore(META_STORE).put(
+        { payload: cachedPayload, updatedAt: operation.createdAt },
+        `cache:${inventorySnapshot.key}`,
+      );
+      await done;
+    } else {
+      await this.storeOperation(operation);
+    }
     this.emit();
     if (this.isOnline()) void this.syncPendingSales();
     return operation;
@@ -643,6 +721,7 @@ export class OfflineSyncService {
   }
 
   private readonly handleOnline = () => {
+    this.backendAvailable = null;
     this.emit();
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;

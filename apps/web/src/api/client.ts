@@ -1,5 +1,6 @@
 const getApiBaseUrl = () => (
-  import.meta.env.VITE_API_BASE_URL
+  window.SMART_PME_CONFIG?.apiBaseUrl
+  || import.meta.env.VITE_API_BASE_URL
   || (import.meta.env.DEV
     ? '/api/v1'
     : `${window.location.protocol}//${window.location.hostname}:3001/api/v1`)
@@ -15,6 +16,13 @@ export class ApiClientError extends Error {
 export class ApiClient {
   private static refreshPromise: Promise<any> | null = null;
   private static accessToken: string | null = null;
+
+  static isNetworkFailure(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    const statusCode = (error as ApiClientError).statusCode;
+    return statusCode === 408 || (statusCode !== undefined && statusCode >= 500)
+      || /inaccessible|réseau|network|failed to fetch|connexion/i.test(error.message);
+  }
 
   private static async fetchApi(url: string, options: RequestInit): Promise<Response> {
     try {

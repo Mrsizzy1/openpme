@@ -77,7 +77,9 @@ npm run dev:web
 - API : <http://localhost:3001/api/v1>
 - Swagger : <http://localhost:3001/api/docs>
 
-Le client desktop Windows est lancé avec `npm run dev:desktop` ou `LANCER_DESKTOP.bat`. Il nécessite Python et les dépendances PyQt6/QtWebEngine.
+Le client desktop Windows est lancé avec `npm run dev:desktop` ou `run_desktop.bat`. Installez ses dépendances Python avec `python -m pip install -r apps/desktop-py/requirements.txt`. Le lancement compile l'interface et la sert localement sur `localhost:5173`, sans dépendre d'un serveur Web distant. `DESKTOP_API_URL` désigne séparément l'API distante à synchroniser. Pour utiliser le serveur Vite déjà lancé en développement, le desktop le détecte automatiquement sur ce port.
+
+L'exécutable Windows est construit avec `npm run build:desktop:exe`; le script embarque le build Web. Après une connexion réussie, les produits, clients, sessions de caisse et derniers reçus consultés sont mis en cache local chiffré. Si le serveur API est absent au démarrage, un profil déjà authentifié peut reprendre ces données et mettre les ventes espèces en file; un premier démarrage sans profil ni catalogue local reste bloqué avec une explication.
 
 ### Contrôle distant des postes desktop
 
@@ -94,7 +96,9 @@ $env:DESKTOP_HEARTBEAT_SECONDS = "15"
 npm run dev:desktop
 ```
 
-Le premier lancement enrôle le poste; son jeton est ensuite stocké chiffré par DPAPI. Le client démarre automatiquement à l'ouverture de session Windows, reste dans la zone de notification quand sa fenêtre est fermée et vérifie le serveur toutes les 10 à 30 secondes (15 secondes par défaut). Le délai de grâce hors ligne est de 24 heures par défaut; `DESKTOP_OFFLINE_GRACE_HOURS` peut être défini sur le poste, de 0 à 168 heures. Le heartbeat conserve l'état verrouillé même si le réseau est coupé et déverrouille le poste dès qu'il reçoit le nouvel état actif.
+Le premier lancement enrôle le poste; son jeton est ensuite stocké chiffré par DPAPI. En mode développement, le client charge les valeurs de `.env` à la racine du dépôt sans écraser celles déjà définies dans l'environnement. L'exécutable déployé ne lit pas de fichier `.env` : configurez ses variables d'environnement via le mécanisme de déploiement approuvé. Ne distribuez pas le secret d'enrôlement aux postes utilisateurs; un administrateur doit le fournir uniquement pendant un enrôlement ou réenrôlement autorisé. Le client ne s'ajoute pas au démarrage de Windows et son lancement reste manuel. Vous pouvez masquer sa fenêtre depuis le menu ou la zone de notification; l'icône reste disponible pour la réafficher. Le client vérifie le serveur toutes les 10 à 30 secondes (15 secondes par défaut). Le délai de grâce hors ligne est de 24 heures par défaut; `DESKTOP_OFFLINE_GRACE_HOURS` peut être défini sur le poste, de 0 à 168 heures. Le heartbeat conserve l'état verrouillé même si le réseau est coupé et déverrouille le poste dès qu'il reçoit le nouvel état actif.
+
+Si le jeton du poste a été révoqué, un simple déverrouillage ne suffit pas : réenrôlez d'abord le poste depuis son écran de verrouillage avec le secret administrateur configuré dans `DESKTOP_ENROLLMENT_SECRET`. Le client récupère ensuite l'état courant du serveur; si un déverrouillage est toujours nécessaire, effectuez-le depuis la page de supervision.
 
 Les anciennes bases doivent appliquer les migrations avant le démarrage de l'API :
 

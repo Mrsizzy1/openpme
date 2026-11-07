@@ -1,0 +1,4 @@
+PyInstaller>=6.11
+PyQt6>=6.8
+PyQt6-WebEngine>=6.8
+python-dotenv>=1.0,<2.0

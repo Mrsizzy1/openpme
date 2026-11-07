@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { webcrypto } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiClientError } from '../src/api/client';
+import { ApiClient, ApiClientError } from '../src/api/client';
 import { OfflineSyncService } from '../src/services/offlineSync';
 
 let nextDatabaseId = 0;
@@ -35,6 +35,12 @@ beforeEach(() => {
 });
 
 describe('IndexedDB offline queue', () => {
+  it('distinguishes an unavailable API from a rejected request', () => {
+    expect(ApiClient.isNetworkFailure(new Error('Serveur API inaccessible.'))).toBe(true);
+    expect(ApiClient.isNetworkFailure(new ApiClientError('Session expirée.', 401))).toBe(false);
+    expect(ApiClient.isNetworkFailure(new ApiClientError('Erreur temporaire.', 503))).toBe(true);
+  });
+
   it('keeps a sale after a lost response and retries with the same idempotency key', async () => {
     let online = false;
     let committedSales = 0;
@@ -174,6 +180,61 @@ describe('IndexedDB offline queue', () => {
     expect(stored.payload.ciphertext).toBeInstanceOf(ArrayBuffer);
     expect(JSON.stringify(stored.payload)).not.toContain('Nom confidentiel');
     expect((await service.getQueue())[0].payload).toMatchObject({ beneficiary: 'Nom confidentiel' });
+  });
+
+  it('persists encrypted point-of-sale snapshots across desktop restarts', async () => {
+    const databaseName = 'offline-sync-pos-cache-test';
+    const api = createApi();
+    const firstRun = new OfflineSyncService({ databaseName, api, isOnline: () => false });
+    const updatedAt = await firstRun.saveCachedData('pos-products', [
+      { id: 'product-1', name: 'Riz', currentStock: 8, salePrice: '4.25' },
+    ]);
+
+    const restarted = new OfflineSyncService({ databaseName, api, isOnline: () => false });
+    const cached = await restarted.getCachedData<any[]>('pos-products');
+
+    expect(cached?.updatedAt).toBe(updatedAt);
+    expect(cached?.value).toEqual([
+      { id: 'product-1', name: 'Riz', currentStock: 8, salePrice: '4.25' },
+    ]);
+  });
+
+  it('reserves sold stock atomically with the offline sale queue', async () => {
+    const databaseName = `offline-sync-stock-reservation-${++nextDatabaseId}`;
+    const service = new OfflineSyncService({ databaseName, isOnline: () => false });
+    const sale = {
+      idempotencyKey: 'offline-sale-stock-reservation',
+      immediatePayment: false,
+      items: [{ productId: 'product-1', quantity: 2, unitPrice: '4.25' }],
+    };
+    const reservedProducts = [{ id: 'product-1', currentStock: 3 }];
+
+    await service.enqueueSale(sale, { key: 'pos-products', value: reservedProducts });
+    await service.enqueueSale(sale, {
+      key: 'pos-products',
+      value: [{ id: 'product-1', currentStock: 1 }],
+    });
+
+    const restarted = new OfflineSyncService({ databaseName, isOnline: () => false });
+    const [queue, cached] = await Promise.all([
+      restarted.getQueue(),
+      restarted.getCachedData<any[]>('pos-products'),
+    ]);
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0].id).toBe(sale.idempotencyKey);
+    expect(cached?.value).toEqual(reservedProducts);
+  });
+
+  it('reports the API unavailable even when the desktop has a local network connection', async () => {
+    const service = createService(undefined, () => true);
+
+    service.markBackendUnavailable();
+
+    expect(await service.getSnapshot()).toMatchObject({
+      status: 'offline',
+      isOnline: false,
+    });
   });
 
   it('keeps a permanent rejection in the conflict journal until explicitly archived', async () => {

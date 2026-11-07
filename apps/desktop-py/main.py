@@ -4,26 +4,107 @@ Application Desktop professionnelle pour la gestion commerciale et financière d
 Module de Supervision et Contrôle à Distance (Killswitch distant & Verrouillage).
 """
 
-import sys
-import os
-import urllib.request
-import urllib.error
-import json
-import socket
 import ctypes
+import html
+import json
+import os
+import socket
+import sys
 import tempfile
+import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
 from datetime import datetime, timezone
-from PyQt6.QtCore import QUrl, Qt, QTimer
+from dotenv import load_dotenv
+from PyQt6.QtCore import QThread, QTimer, QUrl, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QStatusBar, QLabel, QMenuBar, QMenu, QMessageBox,
     QDialog, QPushButton, QSystemTrayIcon, QStyle
 )
 from PyQt6.QtGui import QAction, QKeySequence, QIcon, QFont
-from PyQt6.QtCore import QThread, pyqtSignal
-from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEngineUrlRequestInterceptor
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineUrlRequestInterceptor
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from local_web_server import create_web_server
+
+
+def web_asset_directory():
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "web-dist"
+    return Path(__file__).resolve().parents[1] / "web" / "dist"
+
+
+def is_vite_dev_server(port):
+    try:
+        with urllib.request.urlopen(f"http://localhost:{port}/@vite/client", timeout=1) as response:
+            return response.status == 200 and b"createHotContext" in response.read(64 * 1024)
+    except Exception:
+        return False
+
+
+def start_local_web_server(api_url):
+    port = int(os.environ.get("DESKTOP_LOCAL_WEB_PORT", "5173"))
+    server = create_web_server(web_asset_directory(), api_url, port=port)
+    thread = threading.Thread(target=server.serve_forever, name="SmartPME-Web", daemon=True)
+    thread.start()
+    return server
+
+
+def remove_startup_registration():
+    if os.name != "nt":
+        return
+    try:
+        import winreg
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as key:
+            winreg.DeleteValue(key, "SmartPMEFinance")
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        print(f"[DEMARRAGE WINDOWS] Impossible de désactiver le lancement automatique: {exc}")
+
+
+def load_desktop_environment():
+    if not getattr(sys, "frozen", False):
+        load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+
+def resolve_desktop_target(api_url):
+    explicit_url = os.environ.get("DESKTOP_WEB_URL")
+    if explicit_url:
+        return explicit_url, None
+
+    port = int(os.environ.get("DESKTOP_LOCAL_WEB_PORT", "5173"))
+    try:
+        server = start_local_web_server(api_url)
+    except OSError as error:
+        if is_vite_dev_server(port):
+            return f"http://localhost:{port}/sales?posMode=cashier&desktopMode=1", None
+        raise RuntimeError(
+            f"Impossible de démarrer l’interface locale sur le port {port}. "
+            "Fermez l’application qui utilise ce port ou choisissez DESKTOP_LOCAL_WEB_PORT."
+        ) from error
+
+    return f"{server.base_url}/sales?posMode=cashier", server
+
+
+def startup_fallback_html(target_url):
+    retry_url = html.escape(target_url, quote=True)
+    return f"""<!doctype html>
+<html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart PME Finance — démarrage</title>
+<body style="margin:0;background:#f3f6fb;font:16px Segoe UI, sans-serif;color:#0b1f4d">
+<main style="max-width:620px;margin:12vh auto;padding:32px;background:white;border-radius:12px">
+<h1>Smart PME Finance ne peut pas ouvrir l’interface</h1>
+<p>Le serveur local du desktop ou ses fichiers ne sont pas disponibles. Vérifiez l’installation, puis réessayez.</p>
+<a href="{retry_url}" style="display:inline-block;padding:12px 18px;background:#0b1f4d;color:white;border-radius:6px;text-decoration:none">
+Réessayer</a>
+</main></body></html>"""
 
 
 class DataBlob(ctypes.Structure):
@@ -131,6 +212,43 @@ class HeartbeatWorker(QThread):
             self.failed.emit()
 
 
+class EnrollmentWorker(QThread):
+    succeeded = pyqtSignal(str)
+    failed = pyqtSignal()
+
+    def __init__(self, api_url, enrollment_key, terminal_id, organization_id, display_name):
+        super().__init__()
+        self.api_url = api_url
+        self.enrollment_key = enrollment_key
+        self.terminal_id = terminal_id
+        self.organization_id = organization_id
+        self.display_name = display_name
+
+    def run(self):
+        try:
+            payload = json.dumps({
+                "terminalId": self.terminal_id,
+                "organizationId": self.organization_id,
+                "displayName": self.display_name,
+            }).encode("utf-8")
+            request = urllib.request.Request(
+                f"{self.api_url}/remote-control/enroll",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Desktop-Enrollment-Key": self.enrollment_key,
+                    "User-Agent": "SmartPME-Desktop/1.0",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                token = json.loads(response.read().decode("utf-8"))["terminalToken"]
+            self.succeeded.emit(token)
+        except Exception as exc:
+            print(f"[ENROLEMENT DESKTOP] Échec du réenrôlement: {exc}")
+            self.failed.emit()
+
+
 class TerminalRequestInterceptor(QWebEngineUrlRequestInterceptor):
     def __init__(self, api_url, terminal_id, terminal_token):
         super().__init__()
@@ -149,7 +267,12 @@ class TerminalRequestInterceptor(QWebEngineUrlRequestInterceptor):
 
 class LockOverlayDialog(QDialog):
     """Dialogue modal plein écran de verrouillage à distance déclenché par le manager"""
-    def __init__(self, parent=None, reason="Ce poste a été temporairement verrouillé par la Direction."):
+    def __init__(
+        self,
+        parent=None,
+        reason="Ce poste a été temporairement verrouillé par la Direction.",
+        on_reenroll=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Poste Verrouillé à Distance")
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -168,20 +291,47 @@ class LockOverlayDialog(QDialog):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        msg = QLabel(reason)
+        self.reason_label = QLabel(reason)
         msg_font = QFont("Segoe UI", 13)
-        msg.setFont(msg_font)
-        msg.setStyleSheet("color: #E2E8F0; max-width: 600px;")
-        msg.setWordWrap(True)
-        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(msg)
+        self.reason_label.setFont(msg_font)
+        self.reason_label.setStyleSheet("color: #E2E8F0; max-width: 600px;")
+        self.reason_label.setWordWrap(True)
+        self.reason_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.reason_label)
 
-        info = QLabel("Veuillez contacter votre Manager ou Administrateur pour débloquer cette session.")
-        info.setStyleSheet("color: #94A3B8; font-size: 11px;")
-        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(info)
+        self.info_label = QLabel(
+            "Veuillez contacter votre Manager ou Administrateur pour débloquer cette session."
+        )
+        self.info_label.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.info_label)
+
+        self.content_layout = layout
+        self.reenroll_button = None
+        self.set_reenrollment_handler(on_reenroll)
 
         self.resize(800, 500)
+
+    def set_reenrollment_handler(self, handler):
+        if handler and not self.reenroll_button:
+            self.reenroll_button = QPushButton("Ré-enrôler ce poste")
+            self.reenroll_button.clicked.connect(handler)
+            self.content_layout.addWidget(
+                self.reenroll_button,
+                alignment=Qt.AlignmentFlag.AlignCenter,
+            )
+        elif not handler and self.reenroll_button:
+            self.content_layout.removeWidget(self.reenroll_button)
+            self.reenroll_button.deleteLater()
+            self.reenroll_button = None
+
+    def set_reenrollment_status(self, message, enabled=True):
+        self.info_label.setText(message)
+        if self.reenroll_button:
+            self.reenroll_button.setEnabled(enabled)
+            self.reenroll_button.setText(
+                "Ré-enrôler ce poste" if enabled else "Ré-enrôlement en cours..."
+            )
 
     def closeEvent(self, event):
         if self.property("unlocking"):
@@ -191,10 +341,16 @@ class LockOverlayDialog(QDialog):
 
 
 class SmartPMEDesktop(QMainWindow):
-    def __init__(self, target_url="http://localhost:5173", api_url="http://localhost:3001/api/v1"):
+    def __init__(
+        self,
+        target_url="http://localhost:5173",
+        api_url="http://localhost:3001/api/v1",
+        local_web_server=None,
+    ):
         super().__init__()
         self.target_url = target_url
         self.api_url = api_url
+        self.local_web_server = local_web_server
         
         # Identifiant unique du poste de travail pour le contrôle à distance
         hostname = socket.gethostname() or os.environ.get("COMPUTERNAME", "POSTE-01")
@@ -203,6 +359,15 @@ class SmartPMEDesktop(QMainWindow):
         self.display_name = os.environ.get("DESKTOP_DISPLAY_NAME", hostname)
         self.enrollment_key = os.environ.get("DESKTOP_ENROLLMENT_SECRET", "")
         app_data = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "SmartPME"
+        web_profile_path = app_data / "web-profile"
+        (web_profile_path / "storage").mkdir(parents=True, exist_ok=True)
+        (web_profile_path / "cache").mkdir(parents=True, exist_ok=True)
+        self.web_profile = QWebEngineProfile("SmartPME Finance", self)
+        self.web_profile.setPersistentStoragePath(str(web_profile_path / "storage"))
+        self.web_profile.setCachePath(str(web_profile_path / "cache"))
+        self.web_profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+        )
         self.secure_state_path = app_data / "terminal-state.bin"
         self.secure_state = load_secure_state(self.secure_state_path)
         self.terminal_token = self.secure_state.get("terminalToken")
@@ -213,8 +378,12 @@ class SmartPMEDesktop(QMainWindow):
         if not self.terminal_token:
             self.lock_reason = "Poste non enrôlé. Configurez l'entreprise et le secret d'enrôlement."
         self.heartbeat_worker = None
+        self.enrollment_worker = None
         self.allow_close = False
+        self.user_hidden = False
+        self.terminal_token_rejected = False
         self.lock_dialog = None
+        self.startup_fallback_shown = False
 
         if self.organization_id and not self.terminal_token:
             self.enroll_terminal()
@@ -226,7 +395,6 @@ class SmartPMEDesktop(QMainWindow):
         self.init_menu()
         self.init_status_bar()
         self.init_tray()
-        self.register_startup()
 
         if self.is_locked:
             self.handle_remote_lock(self.lock_reason)
@@ -291,6 +459,9 @@ class SmartPMEDesktop(QMainWindow):
         restore_action = QAction("Afficher Smart PME Finance", self)
         restore_action.triggered.connect(self.restore_window)
         menu.addAction(restore_action)
+        hide_action = QAction("Masquer la fenêtre", self)
+        hide_action.triggered.connect(self.hide_window)
+        menu.addAction(hide_action)
         menu.addSeparator()
         self.tray_quit_action = QAction("Quitter", self)
         self.tray_quit_action.triggered.connect(self.quit_application)
@@ -301,26 +472,19 @@ class SmartPMEDesktop(QMainWindow):
         self.tray.show()
         self.update_tray_lock_state()
 
-    def register_startup(self):
-        if os.name != "nt":
-            return
-        try:
-            import winreg
-            command = f'"{sys.executable}"' if getattr(sys, "frozen", False) else (
-                f'"{sys.executable}" "{Path(__file__).resolve()}"'
-            )
-            command = f"{command} --background"
-            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-                winreg.SetValueEx(key, "SmartPMEFinance", 0, winreg.REG_SZ, command)
-        except OSError as exc:
-            print(f"[DEMARRAGE WINDOWS] {exc}")
-
     def restore_window(self):
+        self.user_hidden = False
         self.showNormal()
         self.raise_()
         self.activateWindow()
         if self.is_locked:
             self.handle_remote_lock(self.lock_reason)
+
+    def hide_window(self):
+        self.user_hidden = True
+        if self.lock_dialog:
+            self.lock_dialog.hide()
+        self.hide()
 
     def update_tray_lock_state(self):
         if hasattr(self, "tray_quit_action"):
@@ -334,8 +498,21 @@ class SmartPMEDesktop(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle(f"Smart PME Finance - Poste Desktop [{self.terminal_id}]")
-        self.resize(1366, 850)
-        self.setMinimumSize(1024, 700)
+        screen = QApplication.primaryScreen()
+        if screen:
+            available = screen.availableGeometry()
+            width = min(1100, int(available.width() * 0.8))
+            height = min(720, int(available.height() * 0.8))
+            self.setMinimumSize(min(800, width), min(550, height))
+            self.setGeometry(
+                available.x() + (available.width() - width) // 2,
+                available.y() + (available.height() - height) // 2,
+                width,
+                height,
+            )
+        else:
+            self.resize(1100, 720)
+            self.setMinimumSize(800, 550)
 
         # Conteneur principal
         central_widget = QWidget(self)
@@ -349,13 +526,14 @@ class SmartPMEDesktop(QMainWindow):
             self.terminal_id,
             self.terminal_token or "",
         )
-        QWebEngineProfile.defaultProfile().setUrlRequestInterceptor(self.request_interceptor)
+        self.web_profile.setUrlRequestInterceptor(self.request_interceptor)
         self.browser = QWebEngineView(self)
-        self.browser.setUrl(QUrl(self.target_url))
-        
+        self.browser.setPage(QWebEnginePage(self.web_profile, self.browser))
+
         # Gestion des titres et chargements
         self.browser.loadStarted.connect(self.on_load_started)
         self.browser.loadFinished.connect(self.on_load_finished)
+        self.browser.setUrl(QUrl(self.target_url))
 
         layout.addWidget(self.browser)
         self.setCentralWidget(central_widget)
@@ -373,9 +551,13 @@ class SmartPMEDesktop(QMainWindow):
 
         file_menu.addSeparator()
 
-        quit_action = QAction("&Masquer dans la zone de notification", self)
+        hide_action = QAction("&Masquer dans la zone de notification", self)
+        hide_action.triggered.connect(self.hide_window)
+        file_menu.addAction(hide_action)
+
+        quit_action = QAction("&Quitter", self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
-        quit_action.triggered.connect(self.close)
+        quit_action.triggered.connect(self.quit_application)
         file_menu.addAction(quit_action)
 
         # Menu Affichage
@@ -434,9 +616,13 @@ class SmartPMEDesktop(QMainWindow):
 
     def on_load_finished(self, success):
         if success:
+            self.startup_fallback_shown = False
             self.status.showMessage("Application connectée et prête.", 3000)
         else:
             self.status.showMessage("Mode déconnecté ou serveur indisponible.", 5000)
+            if not self.startup_fallback_shown:
+                self.startup_fallback_shown = True
+                self.browser.setHtml(startup_fallback_html(self.target_url), QUrl(self.target_url))
 
     def print_current_page(self):
         """Déclenche le dialogue d'impression natif du système pour factures/tickets."""
@@ -488,11 +674,50 @@ class SmartPMEDesktop(QMainWindow):
         self.heartbeat_worker.start()
 
     def handle_terminal_rejection(self):
+        self.terminal_token_rejected = True
         self.lock_reason = "Jeton du poste invalide ou révoqué. Contactez un administrateur pour le réenrôlement."
         self.handle_remote_lock(self.lock_reason)
         self.remote_status_label.setText("Supervision : jeton révoqué")
 
+    def start_reenrollment(self):
+        if not self.enrollment_key or not self.organization_id:
+            return
+        if self.enrollment_worker and self.enrollment_worker.isRunning():
+            return
+
+        self.lock_dialog.set_reenrollment_status(
+            "Réenrôlement sécurisé en cours. Le serveur décidera si le poste est verrouillé ou actif.",
+            enabled=False,
+        )
+        self.enrollment_worker = EnrollmentWorker(
+            self.api_url,
+            self.enrollment_key,
+            self.terminal_id,
+            self.organization_id,
+            self.display_name,
+        )
+        self.enrollment_worker.succeeded.connect(self.complete_reenrollment)
+        self.enrollment_worker.failed.connect(self.fail_reenrollment)
+        self.enrollment_worker.start()
+
+    def complete_reenrollment(self, terminal_token):
+        self.terminal_token = terminal_token
+        self.terminal_token_rejected = False
+        self.request_interceptor.terminal_token = terminal_token
+        self.persist_local_state()
+        self.lock_dialog.set_reenrollment_handler(None)
+        self.lock_dialog.set_reenrollment_status(
+            "Poste réenrôlé. Le poste reste verrouillé jusqu’à son déverrouillage par un administrateur."
+        )
+        QTimer.singleShot(1000, self.check_remote_control)
+
+    def fail_reenrollment(self):
+        self.lock_dialog.set_reenrollment_status(
+            "Échec du réenrôlement. Vérifiez la connexion, l’entreprise et le secret administrateur."
+        )
+
     def apply_server_state(self, response):
+        self.terminal_token_rejected = False
         self.state_version = response["stateVersion"]
         self.last_server_time = response["serverTime"]
         if response["status"] == "LOCKED":
@@ -541,7 +766,7 @@ class SmartPMEDesktop(QMainWindow):
             return
         if self.is_locked:
             self.handle_remote_lock(self.lock_reason)
-        self.hide()
+        self.hide_window()
         event.ignore()
 
     def handle_remote_lock(self, reason):
@@ -549,13 +774,27 @@ class SmartPMEDesktop(QMainWindow):
         self.lock_reason = reason
         self.persist_local_state()
         self.update_tray_lock_state()
-        if not self.lock_dialog or not self.lock_dialog.isVisible():
-            self.lock_dialog = LockOverlayDialog(self, reason=reason)
-            self.lock_dialog.showFullScreen()
+        if not self.lock_dialog:
+            self.lock_dialog = LockOverlayDialog(
+                self,
+                reason=reason,
+            )
         else:
-            for label in self.lock_dialog.findChildren(QLabel):
-                if label.text() != "🔒 ACCÈS SUSPENDU À DISTANCE":
-                    label.setText(reason)
+            self.lock_dialog.reason_label.setText(reason)
+        can_reenroll = bool(
+            self.terminal_token_rejected
+            and self.organization_id
+            and self.enrollment_key
+        )
+        self.lock_dialog.set_reenrollment_handler(
+            self.start_reenrollment if can_reenroll else None
+        )
+        if self.terminal_token_rejected and not can_reenroll:
+            self.lock_dialog.set_reenrollment_status(
+                "Jeton révoqué. Un administrateur doit configurer l'entreprise et le secret d'enrôlement."
+            )
+        if not self.user_hidden:
+            self.lock_dialog.show()
 
     def handle_remote_unlock(self):
         self.is_locked = False
@@ -600,21 +839,36 @@ class SmartPMEDesktop(QMainWindow):
 
 
 def main():
+    load_desktop_environment()
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-logging --no-sandbox"
     
     app = QApplication(sys.argv)
     app.setApplicationName("Smart PME Finance")
     app.setOrganizationName("Smart PME SARL")
+    remove_startup_registration()
 
-    # Ouvrir directement le mode caisse POS par défaut sur le poste desktop
-    target_url = os.environ.get("DESKTOP_WEB_URL", "http://localhost:5173/sales?posMode=cashier")
     api_url = os.environ.get("DESKTOP_API_URL", "http://localhost:3001/api/v1")
+    try:
+        target_url, local_web_server = resolve_desktop_target(api_url)
+    except (OSError, RuntimeError, ValueError) as error:
+        QMessageBox.critical(
+            None,
+            "Démarrage impossible",
+            f"Smart PME Finance n’a pas pu démarrer son interface locale.\n\n{error}\n\n"
+            "Lancez npm run build:web puis réessayez.",
+        )
+        return 1
 
-    window = SmartPMEDesktop(target_url=target_url, api_url=api_url)
-    if "--background" not in sys.argv or window.is_locked:
-        window.show()
-        window.raise_()
-        window.activateWindow()
+    window = SmartPMEDesktop(
+        target_url=target_url,
+        api_url=api_url,
+        local_web_server=local_web_server,
+    )
+    if local_web_server:
+        app.aboutToQuit.connect(local_web_server.shutdown)
+    window.show()
+    window.raise_()
+    window.activateWindow()
 
     sys.exit(app.exec())
 

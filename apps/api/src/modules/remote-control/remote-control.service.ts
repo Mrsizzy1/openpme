@@ -135,6 +135,7 @@ export class RemoteControlService {
         stateVersion: terminal.stateVersion,
         acknowledgedVersion: terminal.acknowledgedVersion,
         lastAcknowledgedAt: terminal.lastAcknowledgedAt,
+        tokenRevoked: Boolean(terminal.tokenRevokedAt),
         commandAcknowledged:
           terminal.acknowledgedVersion === terminal.stateVersion && online,
         offlineGraceHours: terminal.offlineGraceHours,
@@ -187,9 +188,6 @@ export class RemoteControlService {
       where: { terminalId, organizationId },
     });
     if (!terminal) throw new NotFoundException('Terminal introuvable dans cette entreprise.');
-    if (status === DesktopTerminalStatus.ACTIVE && terminal.tokenRevokedAt) {
-      throw new ForbiddenException('Le jeton de ce poste est révoqué; un réenrôlement est requis.');
-    }
 
     const now = new Date();
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -245,6 +243,9 @@ export class RemoteControlService {
       where: { terminalId, organizationId },
     });
     if (!terminal) throw new NotFoundException('Terminal introuvable dans cette entreprise.');
+    if (status === DesktopTerminalStatus.ACTIVE && terminal.tokenRevokedAt) {
+      throw new ForbiddenException('Le jeton de ce poste est révoqué; un réenrôlement est requis.');
+    }
 
     const previous = {
       status: terminal.status,

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import {
   AnomalyRuleType,
   AnomalySeverity,
@@ -18,6 +18,12 @@ import {
   roundAmount,
 } from '../../common/money/decimal-money';
 import { CreatePaymentDto } from './payments.dto';
+
+const UNAVAILABLE_MOBILE_MONEY_METHODS = new Set<PaymentMethod>([
+  PaymentMethod.MOBILE_MONEY_MPESA,
+  PaymentMethod.MOBILE_MONEY_AIRTEL,
+  PaymentMethod.MOBILE_MONEY_ORANGE,
+]);
 
 @Injectable()
 export class PaymentsService {
@@ -41,6 +47,11 @@ export class PaymentsService {
 
   async createPayment(organizationId: string, userId: string, data: CreatePaymentDto) {
     const method = data.method ?? PaymentMethod.CASH;
+    if (UNAVAILABLE_MOBILE_MONEY_METHODS.has(method)) {
+      throw new ServiceUnavailableException(
+        'Le règlement Mobile Money est désactivé tant qu’un opérateur réel n’est pas intégré et configuré.',
+      );
+    }
     try {
       return await this.prisma.$transaction(async (transaction) => {
       if (data.idempotencyKey) {
